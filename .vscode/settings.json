@@ -1,0 +1,44 @@
+{
+    // Auto-save files to prevent sync issues
+    "files.autoSave": "afterDelay",
+    "files.autoSaveDelay": 1000,
+    // File watcher settings - prevent excessive file watching
+    "files.watcherExclude": {
+        "**/.git/objects/**": true,
+        "**/.git/subtree-cache/**": true,
+        "**/node_modules/**": true,
+        "**/dist/**": true,
+        "**/build/**": true
+    },
+    // Enable file watcher for hot reload
+    "files.watcherInclude": [
+        "**/*.js",
+        "**/*.jsx",
+        "**/*.ts",
+        "**/*.tsx",
+        "**/*.css",
+        "**/*.json"
+    ],
+    // Editor settings to prevent caching issues
+    "editor.formatOnSave": true,
+    "editor.codeActionsOnSave": {
+        "source.fixAll": "explicit"
+    },
+    // Git settings
+    "git.enableSmartCommit": true,
+    "git.autofetch": true,
+    // Search settings
+    "search.exclude": {
+        "**/node_modules": true,
+        "**/dist": true,
+        "**/build": true,
+        "**/.git": true
+    },
+    // Tailwind CSS IntelliSense
+    "tailwindCSS.experimental.classRegex": [
+        [
+            "class[Nn]ame[s]?\\s*[:=]\\s*['\"`]([^'\"`]*)['\"`]",
+            "([^'\"`]*)"
+        ]
+    ]
+}
