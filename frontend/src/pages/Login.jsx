@@ -49,7 +49,7 @@ function Login() {
       <nav className="border-b border-gray-800 relative z-10">
         <div className="max-w-7xl mx-auto px-6 py-4">
           <Link to="/" className="text-2xl font-bold">
-            CarVrooom
+            AfterCare AI™
           </Link>
         </div>
       </nav>

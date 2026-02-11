@@ -27,6 +27,7 @@ app.use('/api/users', require('./routes/users'));
 app.use('/api/predictions', require('./routes/predictions'));
 app.use('/api/vehicles', require('./routes/vehicles'));
 app.use('/api/agentic', require('./routes/agentic')); // Agentic AI orchestration
+app.use('/api/ueba', require('./routes/ueba')); // UEBA monitoring
 app.use('/api/llm', require('./routes/llmTest')); // Temporary test route
 
 // Error handling middleware

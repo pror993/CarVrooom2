@@ -1,452 +1,676 @@
 /**
- * Scheduling Agent - Service Appointment Scheduler
+ * Scheduling Agent v2 — Algorithmic Weighted Multi-Factor Scoring
  * 
- * The Scheduling Agent determines optimal service timing and books appointments.
- * Uses LangChain tools to interact with the scheduling system.
+ * Replaces the LLM-based scheduling agent with a deterministic algorithm.
  * 
- * Features:
- * - Decides urgency and optimal timing
- * - Uses schedule_service tool to book appointments
- * - Stores scheduling info in Case.agentResults
+ * Scores every (center, slot) pair using 6 weighted factors:
+ *   1. Distance      (30%) — Haversine distance from user → center
+ *   2. Specialization (20%) — Does center match vehicle make/powertrain?
+ *   3. Urgency Fit   (25%) — Is slot date within the ideal urgency window?
+ *   4. Rating        (10%) — Center's average rating
+ *   5. Load Balance  (10%) — How full is the center on that date?
+ *   6. Preference     (5%) — Is this the user's preferred center?
+ * 
+ * Outputs 3 diverse suggestions:
+ *   • Suggestion 1 — Best overall score
+ *   • Suggestion 2 — Best from a DIFFERENT center (geographic choice)
+ *   • Suggestion 3 — Earliest available (speed pick)
+ * 
+ * ~5ms execution vs ~8s for LLM-based approach.
  */
 
-const { PromptTemplate } = require('@langchain/core/prompts');
-const { JsonOutputParser } = require('@langchain/core/output_parsers');
-const { DynamicStructuredTool } = require('@langchain/core/tools');
-const { z } = require('zod');
-const { llm } = require('./llm');
+const ServiceCenter = require('../models/ServiceCenter');
+const UserProfile = require('../models/UserProfile');
 const Case = require('../models/Case');
 
+// ─────────────────────────────────────────────────────────────
+// HAVERSINE DISTANCE (km)
+// ─────────────────────────────────────────────────────────────
+
 /**
- * Tool: save_scheduling_suggestion
- * Saves scheduling suggestions to the Case for user review
- * Does NOT book appointments - only provides recommendations
+ * Calculate the Haversine distance between two [lon, lat] points
+ * @param {number} lon1 
+ * @param {number} lat1 
+ * @param {number} lon2 
+ * @param {number} lat2 
+ * @returns {number} Distance in kilometers
  */
-const createSaveSchedulingSuggestionTool = (caseId) => {
-  return new DynamicStructuredTool({
-    name: "save_scheduling_suggestion",
-    description: "Saves scheduling recommendations for the user to review and approve. This does NOT book an appointment, only stores suggestions.",
-    schema: z.object({
-      primaryOption: z.object({
-        date: z.string().describe("Suggested appointment date (YYYY-MM-DD)"),
-        serviceCenter: z.string().describe("Recommended service center"),
-        reason: z.string().describe("Why this option is recommended")
-      }),
-      alternativeOptions: z.array(z.object({
-        date: z.string().describe("Alternative appointment date (YYYY-MM-DD)"),
-        serviceCenter: z.string().describe("Alternative service center"),
-        reason: z.string().describe("Why this is an alternative option")
-      })).describe("2-3 alternative options for the user")
-    }),
-    func: async ({ primaryOption, alternativeOptions }) => {
-      try {
-        console.log('   � Scheduling Tool: Saving suggestions for user review...');
-        console.log(`      Primary: ${primaryOption.date} at ${primaryOption.serviceCenter}`);
-        console.log(`      Alternatives: ${alternativeOptions.length} options`);
+function haversineKm(lon1, lat1, lon2, lat2) {
+  const R = 6371; // Earth's radius in km
+  const toRad = (deg) => (deg * Math.PI) / 180;
 
-        // Store scheduling SUGGESTIONS (not confirmed appointments) in Case
-        if (caseId) {
-          const suggestionData = {
-            status: 'pending_user_approval',
-            primarySuggestion: {
-              appointmentDate: new Date(primaryOption.date),
-              serviceCenter: primaryOption.serviceCenter,
-              reason: primaryOption.reason
-            },
-            alternativeSuggestions: alternativeOptions.map(opt => ({
-              appointmentDate: new Date(opt.date),
-              serviceCenter: opt.serviceCenter,
-              reason: opt.reason
-            })),
-            suggestedAt: new Date(),
-            userApprovalRequired: true
-          };
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
 
-          await Case.findOneAndUpdate(
-            { caseId: caseId },
-            { 
-              'agentResults.schedulingAgent': suggestionData,
-              'metadata.schedulingSuggestionsReady': true,
-              'metadata.awaitingUserApproval': true
-            },
-            { new: true }
-          );
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
 
-          console.log('   ✅ Suggestions stored in Case (awaiting user approval)');
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+}
+
+// ─────────────────────────────────────────────────────────────
+// WEIGHT CONFIGURATION
+// ─────────────────────────────────────────────────────────────
+
+const DEFAULT_WEIGHTS = {
+  distance:       0.30,
+  specialization: 0.20,
+  urgencyFit:     0.25,
+  rating:         0.10,
+  loadBalance:    0.10,
+  preference:     0.05
+};
+
+// For critical/high severity, urgency matters more than distance
+const CRITICAL_WEIGHTS = {
+  distance:       0.20,
+  specialization: 0.15,
+  urgencyFit:     0.40,
+  rating:         0.05,
+  loadBalance:    0.10,
+  preference:     0.10
+};
+
+// ─────────────────────────────────────────────────────────────
+// URGENCY WINDOW CALCULATION
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Get the ideal scheduling window [minDays, maxDays] based on severity + ETA
+ * @param {string} severity - critical | high | medium | low
+ * @param {number} etaDays - Days until predicted failure
+ * @returns {{ minDays: number, maxDays: number }}
+ */
+function getUrgencyWindow(severity, etaDays) {
+  switch (severity) {
+    case 'critical':
+      return { minDays: 0, maxDays: 2 };
+    case 'high':
+      return { minDays: 1, maxDays: Math.min(7, Math.max(2, etaDays - 1)) };
+    case 'medium':
+      return { minDays: 3, maxDays: Math.min(Math.floor(etaDays * 0.5), 28) };
+    case 'low':
+      return { minDays: 7, maxDays: Math.min(Math.floor(etaDays * 0.8), 56) };
+    default:
+      return { minDays: 3, maxDays: Math.min(Math.floor(etaDays * 0.5), 28) };
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+// INDIVIDUAL SCORING FUNCTIONS
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Distance score: closer is better
+ * @param {number} distanceKm
+ * @param {number} maxRadiusKm - Maximum search radius
+ * @returns {number} Score 0–1
+ */
+function scoreDistance(distanceKm, maxRadiusKm = 150) {
+  if (distanceKm <= 0) return 1.0;
+  return Math.max(0, 1 - distanceKm / maxRadiusKm);
+}
+
+/**
+ * Specialization match score
+ * @param {string[]} centerSpecs - Center's specializations array
+ * @param {string} vehicleMake - e.g. "Tata"
+ * @param {string} powertrain - e.g. "electric"
+ * @returns {number} Score 0–1
+ */
+function scoreSpecialization(centerSpecs, vehicleMake, powertrain) {
+  const specsLower = centerSpecs.map(s => s.toLowerCase());
+  const makeLower = (vehicleMake || '').toLowerCase();
+  const ptLower = (powertrain || '').toLowerCase();
+
+  // Exact make match → 1.0
+  if (makeLower && specsLower.some(s => s.includes(makeLower) || makeLower.includes(s))) {
+    return 1.0;
+  }
+
+  // Powertrain match (e.g., "ev diagnostics" for "electric")
+  const evKeywords = ['electric', 'ev', 'hybrid'];
+  const isEV = evKeywords.some(k => ptLower.includes(k));
+  if (isEV && specsLower.some(s => s.includes('ev') || s.includes('electric') || s.includes('battery'))) {
+    return 1.0;
+  }
+
+  // General maintenance → 0.5
+  if (specsLower.some(s => s.includes('general'))) {
+    return 0.5;
+  }
+
+  // No match → 0.2
+  return 0.2;
+}
+
+/**
+ * Urgency fit score: is the slot date within the ideal window?
+ * @param {number} daysFromNow
+ * @param {{ minDays: number, maxDays: number }} window
+ * @param {number} etaDays
+ * @returns {number} Score 0–1
+ */
+function scoreUrgencyFit(daysFromNow, window, etaDays) {
+  // Perfect: within the ideal window
+  if (daysFromNow >= window.minDays && daysFromNow <= window.maxDays) {
+    return 1.0;
+  }
+
+  // Earlier than window (proactive) — still decent
+  if (daysFromNow < window.minDays) {
+    return 0.7;
+  }
+
+  // Later than window but before ETA — linear decay
+  if (daysFromNow > window.maxDays && daysFromNow < etaDays) {
+    const overshoot = daysFromNow - window.maxDays;
+    const remaining = Math.max(1, etaDays - window.maxDays);
+    return Math.max(0.2, 1 - (overshoot / remaining) * 0.8);
+  }
+
+  // After ETA — dangerous
+  return 0.1;
+}
+
+/**
+ * Rating score: higher is better
+ * @param {number} avgRating - 0–5
+ * @returns {number} Score 0–1
+ */
+function scoreRating(avgRating) {
+  return (avgRating || 0) / 5.0;
+}
+
+/**
+ * Load balance score: prefer less-loaded centers
+ * @param {number} availableSlots - Available slots on that date
+ * @param {number} totalSlots - Total possible slots (typically 5)
+ * @returns {number} Score 0–1
+ */
+function scoreLoadBalance(availableSlots, totalSlots = 5) {
+  if (totalSlots === 0) return 0;
+  return availableSlots / totalSlots;
+}
+
+/**
+ * Preference score: bonus for user's preferred center
+ * @param {string} centerId
+ * @param {string|null} preferredCenterId
+ * @returns {number} Score 0 or 1
+ */
+function scorePreference(centerId, preferredCenterId) {
+  if (!preferredCenterId) return 0;
+  return centerId === preferredCenterId ? 1.0 : 0.0;
+}
+
+// ─────────────────────────────────────────────────────────────
+// COMPOSITE SCORING
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Calculate composite score for a (center, slot) pair
+ */
+function calculateCompositeScore({
+  distanceKm,
+  centerSpecs,
+  vehicleMake,
+  powertrain,
+  daysFromNow,
+  urgencyWindow,
+  etaDays,
+  avgRating,
+  availableSlotsOnDate,
+  centerId,
+  preferredCenterId,
+  isEmergency,
+  severity,
+  weights,
+  maxRadiusKm
+}) {
+  const d = scoreDistance(distanceKm, maxRadiusKm);
+  const s = scoreSpecialization(centerSpecs, vehicleMake, powertrain);
+  const u = scoreUrgencyFit(daysFromNow, urgencyWindow, etaDays);
+  const r = scoreRating(avgRating);
+  const l = scoreLoadBalance(availableSlotsOnDate);
+  const p = scorePreference(centerId, preferredCenterId);
+
+  let totalScore =
+    weights.distance * d +
+    weights.specialization * s +
+    weights.urgencyFit * u +
+    weights.rating * r +
+    weights.loadBalance * l +
+    weights.preference * p;
+
+  // Emergency center bonus for critical/high severity
+  const emergencyBonus = (isEmergency && (severity === 'critical' || severity === 'high')) ? 0.15 : 0;
+  totalScore += emergencyBonus;
+
+  // Cap at 1.0
+  totalScore = Math.min(1.0, totalScore);
+
+  return {
+    totalScore: Math.round(totalScore * 1000) / 1000,
+    breakdown: {
+      distance:       { raw: Math.round(d * 100) / 100, weighted: Math.round(weights.distance * d * 100) / 100 },
+      specialization: { raw: Math.round(s * 100) / 100, weighted: Math.round(weights.specialization * s * 100) / 100 },
+      urgencyFit:     { raw: Math.round(u * 100) / 100, weighted: Math.round(weights.urgencyFit * u * 100) / 100 },
+      rating:         { raw: Math.round(r * 100) / 100, weighted: Math.round(weights.rating * r * 100) / 100 },
+      loadBalance:    { raw: Math.round(l * 100) / 100, weighted: Math.round(weights.loadBalance * l * 100) / 100 },
+      preference:     { raw: Math.round(p * 100) / 100, weighted: Math.round(weights.preference * p * 100) / 100 },
+      emergencyBonus
+    }
+  };
+}
+
+// ─────────────────────────────────────────────────────────────
+// REASON GENERATOR
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Generate a human-readable reason string for a suggestion
+ */
+function generateReason(scored, index) {
+  const { center, slot, distanceKm, daysFromNow, scoring } = scored;
+  const parts = [];
+
+  // Lead with suggestion type
+  if (index === 0) parts.push('Best overall match.');
+  else if (scored.label === 'alternative_center') parts.push('Alternative center for geographic choice.');
+  else if (scored.label === 'earliest_available') parts.push('Earliest available slot for fastest service.');
+  else parts.push('Additional option.');
+
+  // Distance
+  if (distanceKm < 10) parts.push(`Very close (${distanceKm.toFixed(1)} km).`);
+  else if (distanceKm < 30) parts.push(`Nearby (${distanceKm.toFixed(1)} km).`);
+  else parts.push(`${distanceKm.toFixed(1)} km away.`);
+
+  // Specialization
+  if (scoring.breakdown.specialization.raw >= 1.0) {
+    parts.push('Specializes in your vehicle type.');
+  }
+
+  // Rating
+  if (center.rating.average >= 4.5) parts.push(`Highly rated (${center.rating.average}★).`);
+  else if (center.rating.average >= 4.0) parts.push(`Well rated (${center.rating.average}★).`);
+
+  // Emergency
+  if (center.isEmergency) parts.push('Emergency service available.');
+
+  // Timing
+  if (daysFromNow === 0) parts.push('Available today!');
+  else if (daysFromNow === 1) parts.push('Available tomorrow.');
+  else if (daysFromNow <= 3) parts.push(`Available in ${daysFromNow} days.`);
+
+  return parts.join(' ');
+}
+
+// ─────────────────────────────────────────────────────────────
+// MAIN SCHEDULING FUNCTION
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Algorithmic Scheduling Agent v2
+ * 
+ * Scores all (center, slot) pairs and returns top 3 diverse suggestions.
+ * 
+ * @param {Object} params
+ * @param {Object} params.diagnosticResult - { risk, urgency, summary }
+ * @param {Object} params.vehicle - Vehicle mongoose document
+ * @param {Object} params.prediction - PredictionEvent mongoose document
+ * @param {string|null} params.caseId - Case ID string for saving results
+ * @param {string|null} params.userId - User's _id (to fetch UserProfile)
+ * @param {Object|null} params.userProfile - Pre-fetched UserProfile (optional)
+ * @returns {Promise<Object>} Scheduling result with 3 diverse suggestions
+ */
+async function schedulingAgent({
+  diagnosticResult,
+  vehicle,
+  prediction,
+  caseId = null,
+  userId = null,
+  userProfile = null
+}) {
+  const startTime = Date.now();
+  console.log('📅 Scheduling Agent v2: Algorithmic scoring started...');
+
+  try {
+    // ─── 1. LOAD USER PROFILE ────────────────────────────────────
+    let profile = userProfile;
+    if (!profile && userId) {
+      profile = await UserProfile.findOne({ userId }).lean();
+    }
+
+    const userCoords = profile?.location?.coordinates || [0, 0]; // [lon, lat]
+    const userLon = userCoords[0];
+    const userLat = userCoords[1];
+    const preferredCenterId = profile?.preferredServiceCenter
+      ? profile.preferredServiceCenter.toString()
+      : null;
+
+    const hasUserLocation = userLon !== 0 || userLat !== 0;
+
+    console.log(`   📍 User location: [${userLon}, ${userLat}] ${hasUserLocation ? '✓' : '(no coords — distance scoring disabled)'}`);
+    console.log(`   🚗 Vehicle: ${vehicle.vehicleInfo.make} ${vehicle.vehicleInfo.model} (${vehicle.vehicleInfo.powertrain})`);
+
+    // ─── 2. DETERMINE SEVERITY & URGENCY WINDOW ─────────────────
+    const severity = diagnosticResult?.urgency || diagnosticResult?.risk || 'medium';
+    const etaDays = prediction.etaDays || 30;
+    const urgencyWindow = getUrgencyWindow(severity, etaDays);
+    const weights = (severity === 'critical' || severity === 'high') ? CRITICAL_WEIGHTS : DEFAULT_WEIGHTS;
+
+    console.log(`   ⚡ Severity: ${severity} | ETA: ${etaDays} days | Window: [${urgencyWindow.minDays}d, ${urgencyWindow.maxDays}d]`);
+
+    // ─── 3. FETCH CANDIDATE CENTERS ──────────────────────────────
+    const maxRadiusKm = severity === 'critical' ? 200 : severity === 'high' ? 150 : 100;
+
+    let centers;
+    if (hasUserLocation) {
+      // GeoJSON $nearSphere — returns sorted by distance
+      centers = await ServiceCenter.find({
+        isActive: true,
+        geoLocation: {
+          $nearSphere: {
+            $geometry: { type: 'Point', coordinates: [userLon, userLat] },
+            $maxDistance: maxRadiusKm * 1000
+          }
         }
+      }).limit(20);
+    } else {
+      // No user location — fallback to all active centers
+      centers = await ServiceCenter.find({ isActive: true }).limit(20);
+    }
 
-        return JSON.stringify({
-          success: true,
-          message: 'Scheduling suggestions saved for user review',
-          primaryOption: primaryOption,
-          alternativeCount: alternativeOptions.length,
-          nextStep: 'User will review and approve via frontend'
+    if (centers.length === 0) {
+      throw new Error('No active service centers found within search radius');
+    }
+
+    console.log(`   🔧 Found ${centers.length} candidate centers (radius: ${maxRadiusKm}km)`);
+
+    // ─── 4. SCORE EVERY (CENTER, SLOT) PAIR ──────────────────────
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const maxDaysAhead = Math.max(urgencyWindow.maxDays * 2, 30);
+    const cutoffDate = new Date(today);
+    cutoffDate.setDate(cutoffDate.getDate() + maxDaysAhead);
+
+    const scoredPairs = [];
+
+    for (const center of centers) {
+      // Calculate distance
+      const centerCoords = center.geoLocation?.coordinates || [0, 0];
+      const distanceKm = hasUserLocation
+        ? haversineKm(userLon, userLat, centerCoords[0], centerCoords[1])
+        : 0;
+
+      // Get available slots in window
+      const availableSlots = center.slots.filter(slot => {
+        if (slot.status !== 'available') return false;
+        const slotDate = new Date(slot.date);
+        return slotDate >= today && slotDate <= cutoffDate;
+      });
+
+      if (availableSlots.length === 0) continue;
+
+      // Group slots by date for load balance
+      const slotsByDate = {};
+      for (const slot of center.slots) {
+        const dateKey = new Date(slot.date).toISOString().split('T')[0];
+        if (!slotsByDate[dateKey]) slotsByDate[dateKey] = { total: 0, available: 0 };
+        slotsByDate[dateKey].total++;
+        if (slot.status === 'available') slotsByDate[dateKey].available++;
+      }
+
+      // Score each available slot
+      for (const slot of availableSlots) {
+        const slotDate = new Date(slot.date);
+        const daysFromNow = Math.round((slotDate - today) / (1000 * 60 * 60 * 24));
+        const dateKey = slotDate.toISOString().split('T')[0];
+        const dateStats = slotsByDate[dateKey] || { total: 5, available: 1 };
+
+        const scoring = calculateCompositeScore({
+          distanceKm,
+          centerSpecs: center.specializations,
+          vehicleMake: vehicle.vehicleInfo.make,
+          powertrain: vehicle.vehicleInfo.powertrain,
+          daysFromNow,
+          urgencyWindow,
+          etaDays,
+          avgRating: center.rating.average,
+          availableSlotsOnDate: dateStats.available,
+          centerId: center._id.toString(),
+          preferredCenterId,
+          isEmergency: center.isEmergency,
+          severity,
+          weights,
+          maxRadiusKm
         });
-      } catch (error) {
-        console.error('   ❌ Scheduling Tool Error:', error.message);
-        return JSON.stringify({
-          success: false,
-          error: error.message
+
+        scoredPairs.push({
+          center,
+          slot,
+          distanceKm,
+          daysFromNow,
+          scoring,
+          label: null // set during selection
         });
       }
     }
-  });
-};
 
-// Define the output schema
-const outputParser = new JsonOutputParser();
-
-// Create the prompt template
-const schedulingAgentPrompt = PromptTemplate.fromTemplate(`You are a Scheduling Agent for a vehicle predictive maintenance system.
-
-Your role is to analyze diagnostic data and provide scheduling recommendations for the user to review and approve.
-
-**IMPORTANT**: You do NOT book appointments automatically. You provide suggestions that the user will review in the frontend.
-
-## Input Data
-
-### Diagnostic Result:
-- Summary: {diagnosticSummary}
-- Risk Level: {riskLevel}
-- Urgency Level: {urgencyLevel}
-
-### Vehicle Information:
-- Vehicle ID: {vehicleId}
-- Make/Model/Year: {vehicleMakeModel} {vehicleYear}
-- Current Location: {location}
-- Average Daily KM: {avgDailyKm}
-- Load Pattern: {loadPattern}
-
-### Prediction Data:
-- ETA Days: {etaDays}
-- Prediction Type: {predictionType}
-- Confidence: {confidence}
-
-### Available Service Centers:
-{serviceCenters}
-
-## Your Task
-
-Analyze the diagnostic data and provide scheduling recommendations for the user to review.
-
-### Step 1: Determine Scheduling Urgency
-
-Based on the urgency level and risk:
-- **critical urgency**: Recommend options within 24-48 hours (emergency slots)
-- **high urgency**: Recommend options within 3-7 days (priority slots)
-- **medium urgency**: Recommend options within 2-4 weeks (standard slots)
-- **low urgency**: Recommend options within 4-8 weeks or next routine service
-
-### Step 2: Select Service Centers
-
-Identify 2-4 suitable service centers considering:
-- Proximity to vehicle location
-- Specialization (if needed for specific powertrain/make)
-- Different urgency levels (emergency vs standard)
-
-### Step 3: Calculate Suggested Dates
-
-For PRIMARY option:
-- Start from today's date: {currentDate}
-- Add appropriate buffer based on urgency
-- Consider that the prediction ETA is {etaDays} days
-- Suggest BEFORE the predicted failure if possible
-
-For ALTERNATIVE options (provide 2-3):
-- Earlier date at emergency center (if critical/high urgency)
-- Later date at convenient center (if medium/low urgency)
-- Different service center with similar timing
-- Weekend/evening slots if available
-
-### Step 4: Use the save_scheduling_suggestion Tool
-
-You have access to the **save_scheduling_suggestion** tool. You MUST call this tool to save recommendations.
-
-The tool accepts:
-- primaryOption: { date, serviceCenter, reason }
-- alternativeOptions: [{ date, serviceCenter, reason }, ...]
-
-### Decision Guidelines
-
-**For Critical Urgency:**
-- Primary: Next available slot (1-2 days)
-- Alternatives: Emergency centers, different times same day
-
-**For High Urgency:**
-- Primary: Within 3-5 days at specialized center
-- Alternatives: Earlier emergency slot, different specialized center
-
-**For Medium Urgency:**
-- Primary: ~50% of ETA days at convenient location
-- Alternatives: Earlier date, different locations, weekend slots
-
-**For Low Urgency:**
-- Primary: Next routine service window (4-8 weeks)
-- Alternatives: Different convenient times/locations
-
-## Output Format
-
-After calling the save_scheduling_suggestion tool, respond with a JSON object:
-
-{{
-  "schedulingUrgency": "critical|high|medium|low",
-  "primaryRecommendation": {{
-    "date": "YYYY-MM-DD",
-    "serviceCenter": "Center name",
-    "serviceCenterId": "SC-XXX",
-    "reasoning": "Why this is the best option"
-  }},
-  "alternativeRecommendations": [
-    {{
-      "date": "YYYY-MM-DD",
-      "serviceCenter": "Center name",
-      "serviceCenterId": "SC-XXX",
-      "reasoning": "Why this is an alternative"
-    }}
-  ],
-  "toolCalled": true,
-  "userApprovalRequired": true,
-  "additionalNotes": "Any special considerations for the user"
-}}
-
-{format_instructions}
-
-**IMPORTANT**: 
-1. You MUST call the save_scheduling_suggestion tool to store recommendations
-2. Do NOT book appointments - only provide suggestions
-3. Provide 1 primary + 2-3 alternative options
-4. User will review and approve via frontend
-5. Use exact date format YYYY-MM-DD
-6. Base decisions on urgency and ETA days
-
-Think through the scheduling options, then call the tool, then provide your final JSON response.`);
-
-/**
- * Scheduling Agent - Provides scheduling suggestions for user approval
- * 
- * @param {Object} diagnosticResult - Result from DiagnosticAgent
- * @param {Object} vehicle - Vehicle information
- * @param {Object} prediction - Prediction data
- * @param {string} caseId - Case ID for storing scheduling suggestions
- * @returns {Promise<Object>} Scheduling suggestions for user review
- */
-async function schedulingAgent(diagnosticResult, vehicle, prediction, caseId = null) {
-  try {
-    console.log('📅 Scheduling Agent: Generating scheduling recommendations...');
-
-    // Create the save_scheduling_suggestion tool with case context
-    const saveSuggestionTool = createSaveSchedulingSuggestionTool(caseId);
-
-    // Available service centers (in real app, this would be fetched from database)
-    const serviceCenters = [
-      { id: 'SC-001', name: 'Downtown Service Center', location: 'Downtown', specialties: ['All makes'] },
-      { id: 'SC-002', name: 'North Auto Care', location: 'North District', specialties: ['Electric vehicles', 'Tesla'] },
-      { id: 'SC-003', name: 'Express Auto Repair', location: 'West Side', specialties: ['Emergency service'] },
-      { id: 'SC-004', name: 'Premium Motors Service', location: 'East District', specialties: ['Luxury vehicles', 'Ford', 'Toyota'] }
-    ];
-
-    // Prepare input data for prompt
-    const currentDate = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
-    
-    const promptInput = {
-      // Diagnostic result
-      diagnosticSummary: diagnosticResult.summary,
-      riskLevel: diagnosticResult.risk,
-      urgencyLevel: diagnosticResult.urgency,
-      
-      // Vehicle information
-      vehicleId: vehicle.vehicleId,
-      vehicleMakeModel: `${vehicle.vehicleInfo.make} ${vehicle.vehicleInfo.model}`,
-      vehicleYear: vehicle.vehicleInfo.year,
-      location: 'Downtown', // In real app, get from vehicle GPS or owner address
-      avgDailyKm: vehicle.usageProfile.avgDailyKm,
-      loadPattern: vehicle.usageProfile.loadPattern,
-      
-      // Prediction data
-      etaDays: prediction.etaDays,
-      predictionType: prediction.predictionType,
-      confidence: prediction.confidence,
-      
-      // Service centers
-      serviceCenters: JSON.stringify(serviceCenters, null, 2),
-      
-      // Current date
-      currentDate: currentDate,
-      
-      // Format instructions
-      format_instructions: outputParser.getFormatInstructions()
-    };
-
-    // For LangChain agent with tools, we need to use a different approach
-    // Since we're using temperature=0, we'll simulate the tool call manually
-    // In a production system, you'd use AgentExecutor
-    
-    console.log('   📋 Analyzing urgency and generating suggestions...');
-    
-    // Calculate recommended dates based on urgency
-    let primaryDaysToAdd = 0;
-    let alternativeDays = [];
-    
-    switch (diagnosticResult.urgency) {
-      case 'critical':
-        primaryDaysToAdd = 1; // Next day
-        alternativeDays = [0, 2]; // Today emergency, or day after
-        break;
-      case 'high':
-        primaryDaysToAdd = 5; // Within a week
-        alternativeDays = [3, 7]; // Earlier or slightly later
-        break;
-      case 'medium':
-        primaryDaysToAdd = 14; // 2 weeks
-        alternativeDays = [10, 21]; // 10 days or 3 weeks
-        break;
-      case 'low':
-        primaryDaysToAdd = 30; // 1 month
-        alternativeDays = [21, 45]; // 3 weeks or 6 weeks
-        break;
+    if (scoredPairs.length === 0) {
+      throw new Error('No available slots found in any center within the scheduling window');
     }
 
-    // Ensure primary is before the predicted failure
-    if (primaryDaysToAdd >= prediction.etaDays) {
-      primaryDaysToAdd = Math.max(1, Math.floor(prediction.etaDays * 0.6)); // 60% of ETA
+    console.log(`   📊 Scored ${scoredPairs.length} (center, slot) pairs`);
+
+    // ─── 5. SELECT TOP 3 DIVERSE SUGGESTIONS ─────────────────────
+
+    // Sort by score descending
+    scoredPairs.sort((a, b) => b.scoring.totalScore - a.scoring.totalScore);
+
+    const suggestions = [];
+
+    // #1: Best overall score
+    const best = { ...scoredPairs[0], label: 'best_overall' };
+    suggestions.push(best);
+
+    // #2: Best from a DIFFERENT center
+    const diffCenter = scoredPairs.find(
+      p => p.center.serviceCenterId !== best.center.serviceCenterId
+    );
+    if (diffCenter) {
+      suggestions.push({ ...diffCenter, label: 'alternative_center' });
     }
 
-    // Calculate dates
-    const calculateDate = (daysFromNow) => {
-      const date = new Date();
-      date.setDate(date.getDate() + daysFromNow);
-      return date.toISOString().split('T')[0];
-    };
-
-    const primaryDate = calculateDate(primaryDaysToAdd);
-    
-    // Select service centers based on urgency and vehicle type
-    let primaryCenter = serviceCenters[0];
-    let altCenters = [];
-    
-    if (diagnosticResult.urgency === 'critical') {
-      // Primary: Emergency service
-      primaryCenter = serviceCenters.find(sc => sc.specialties.includes('Emergency service')) || serviceCenters[0];
-      // Alternatives: Other emergency or specialized
-      altCenters = serviceCenters.filter(sc => sc.id !== primaryCenter.id).slice(0, 2);
-    } else {
-      // Primary: Match vehicle specialization
-      const vehicleMake = vehicle.vehicleInfo.make;
-      primaryCenter = serviceCenters.find(sc => 
-        sc.specialties.some(s => s.toLowerCase().includes(vehicleMake.toLowerCase()))
-      ) || serviceCenters[0];
-      
-      // Alternatives: Different specialized centers
-      altCenters = serviceCenters
-        .filter(sc => sc.id !== primaryCenter.id)
-        .slice(0, 2);
+    // #3: Earliest available (not already picked)
+    const earliestSorted = [...scoredPairs].sort(
+      (a, b) => a.daysFromNow - b.daysFromNow || b.scoring.totalScore - a.scoring.totalScore
+    );
+    const earliest = earliestSorted.find(p =>
+      !suggestions.some(
+        s => s.center.serviceCenterId === p.center.serviceCenterId &&
+             s.slot.timeSlot === p.slot.timeSlot &&
+             s.daysFromNow === p.daysFromNow
+      )
+    );
+    if (earliest) {
+      suggestions.push({ ...earliest, label: 'earliest_available' });
     }
 
-    console.log(`   � Primary suggestion: ${primaryDate} at ${primaryCenter.name}`);
-    console.log(`   💡 Generating ${alternativeDays.length} alternative options...`);
+    // Fill to 3 if needed
+    if (suggestions.length < 3) {
+      for (const pair of scoredPairs) {
+        if (suggestions.length >= 3) break;
+        const isDup = suggestions.some(
+          s => s.center.serviceCenterId === pair.center.serviceCenterId &&
+               s.slot.timeSlot === pair.slot.timeSlot &&
+               s.daysFromNow === pair.daysFromNow
+        );
+        if (!isDup) {
+          suggestions.push({ ...pair, label: 'additional_option' });
+        }
+      }
+    }
 
-    // Build primary and alternative options
-    const primaryOption = {
-      date: primaryDate,
-      serviceCenter: primaryCenter.name,
-      reason: `Best option: ${diagnosticResult.urgency} urgency, ${prediction.etaDays}-day ETA. ${primaryCenter.specialties.join(', ')}`
-    };
+    const executionMs = Date.now() - startTime;
+    console.log(`   ⚡ Scoring complete in ${executionMs}ms`);
 
-    const alternativeOptions = alternativeDays.map((days, index) => {
-      const altDate = calculateDate(days);
-      const altCenter = altCenters[index] || serviceCenters[index + 1] || serviceCenters[0];
-      
-      return {
-        date: altDate,
-        serviceCenter: altCenter.name,
-        reason: days < primaryDaysToAdd 
-          ? `Earlier option: ${days} days at ${altCenter.specialties.join(', ')}`
-          : `Alternative timing: ${days} days at ${altCenter.specialties.join(', ')}`
-      };
-    });
+    // ─── 6. FORMAT OUTPUT ────────────────────────────────────────
 
-    // Call the save_scheduling_suggestion tool
-    const toolResult = await saveSuggestionTool.invoke({
-      primaryOption,
-      alternativeOptions
-    });
-
-    console.log('✅ Scheduling Agent: Suggestions ready for user review');
-
-    // Parse tool result
-    const toolResultParsed = JSON.parse(toolResult);
-
-    // Create response
-    const result = {
-      schedulingUrgency: diagnosticResult.urgency,
-      primaryRecommendation: {
-        date: primaryDate,
-        serviceCenter: primaryCenter.name,
-        serviceCenterId: primaryCenter.id,
-        location: primaryCenter.location,
-        reasoning: `Based on ${diagnosticResult.urgency} urgency and ${prediction.etaDays}-day ETA, this is the optimal timing at a center specializing in ${primaryCenter.specialties.join(', ')}`
+    const formatSuggestion = (scored, index) => ({
+      rank: index + 1,
+      label: scored.label,
+      serviceCenter: {
+        id: scored.center.serviceCenterId,
+        name: scored.center.name,
+        city: scored.center.location.city,
+        address: scored.center.location.address,
+        rating: scored.center.rating.average,
+        ratingCount: scored.center.rating.count,
+        isEmergency: scored.center.isEmergency,
+        specializations: scored.center.specializations
       },
-      alternativeRecommendations: alternativeDays.map((days, index) => {
-        const altDate = calculateDate(days);
-        const altCenter = altCenters[index] || serviceCenters[index + 1] || serviceCenters[0];
-        return {
-          date: altDate,
-          serviceCenter: altCenter.name,
-          serviceCenterId: altCenter.id,
-          location: altCenter.location,
-          reasoning: days < primaryDaysToAdd 
-            ? `Earlier slot available for more urgent attention`
-            : `More flexible timing if primary doesn't work for your schedule`
-        };
-      }),
-      toolCalled: true,
+      slot: {
+        date: new Date(scored.slot.date).toISOString().split('T')[0],
+        timeSlot: scored.slot.timeSlot,
+        daysFromNow: scored.daysFromNow
+      },
+      distanceKm: Math.round(scored.distanceKm * 10) / 10,
+      score: scored.scoring.totalScore,
+      scoreBreakdown: scored.scoring.breakdown,
+      reason: generateReason(scored, index)
+    });
+
+    const result = {
+      schedulingUrgency: severity,
+      algorithm: 'weighted_multi_factor_v2',
+      executionTimeMs: executionMs,
+      searchParams: {
+        userLocation: hasUserLocation ? [userLon, userLat] : null,
+        maxRadiusKm,
+        urgencyWindow,
+        etaDays,
+        weightsUsed: weights,
+        candidateCenters: centers.length,
+        totalScoredPairs: scoredPairs.length
+      },
+      suggestions: suggestions.map(formatSuggestion),
+      // Backward-compatible fields for orchestrator
+      primaryRecommendation: {
+        date: new Date(suggestions[0].slot.date).toISOString().split('T')[0],
+        timeSlot: suggestions[0].slot.timeSlot,
+        serviceCenter: suggestions[0].center.name,
+        serviceCenterId: suggestions[0].center.serviceCenterId,
+        location: `${suggestions[0].center.location.address}, ${suggestions[0].center.location.city}`,
+        distanceKm: Math.round(suggestions[0].distanceKm * 10) / 10,
+        score: suggestions[0].scoring.totalScore,
+        reasoning: generateReason(suggestions[0], 0)
+      },
+      alternativeRecommendations: suggestions.slice(1).map((s, i) => ({
+        date: new Date(s.slot.date).toISOString().split('T')[0],
+        timeSlot: s.slot.timeSlot,
+        serviceCenter: s.center.name,
+        serviceCenterId: s.center.serviceCenterId,
+        location: `${s.center.location.address}, ${s.center.location.city}`,
+        distanceKm: Math.round(s.distanceKm * 10) / 10,
+        score: s.scoring.totalScore,
+        reasoning: generateReason(s, i + 1)
+      })),
       userApprovalRequired: true,
-      suggestionsSaved: toolResultParsed.success,
-      additionalNotes: diagnosticResult.urgency === 'critical' 
-        ? 'URGENT: Please review and confirm appointment as soon as possible. Your vehicle needs immediate attention.'
-        : diagnosticResult.urgency === 'high'
-        ? 'IMPORTANT: Please review and select an appointment within the next 24 hours to ensure timely service.'
-        : diagnosticResult.urgency === 'medium'
-        ? 'Please review these options and select the most convenient appointment for you.'
-        : 'These are suggested maintenance windows. Please select a time that fits your schedule.',
-      daysUntilPrimaryAppointment: primaryDaysToAdd,
-      safetyMargin: prediction.etaDays - primaryDaysToAdd,
-      nextSteps: [
-        'User will receive notification with scheduling options',
-        'User reviews and selects preferred time slot',
-        'System confirms appointment after user approval',
-        'Service center is notified of confirmed appointment'
-      ]
+      status: 'pending_user_approval',
+      additionalNotes: severity === 'critical'
+        ? 'URGENT: Your vehicle needs immediate attention. Please confirm an appointment ASAP.'
+        : severity === 'high'
+        ? 'IMPORTANT: Please review and select an appointment within 24 hours.'
+        : severity === 'medium'
+        ? 'Please review these options and select the most convenient appointment.'
+        : 'Routine maintenance suggested. Select a time that works for your schedule.'
     };
 
-    console.log('   Urgency:', result.schedulingUrgency);
-    console.log('   Primary:', result.primaryRecommendation.date);
-    console.log('   Alternatives:', result.alternativeRecommendations.length, 'options');
-    console.log('   User approval required: YES');
+    // ─── 7. SAVE TO CASE ─────────────────────────────────────────
+
+    if (caseId) {
+      await Case.findOneAndUpdate(
+        { caseId },
+        {
+          'agentResults.schedulingAgent': {
+            status: 'pending_user_approval',
+            algorithm: 'weighted_multi_factor_v2',
+            executionTimeMs: executionMs,
+            suggestions: result.suggestions,
+            primarySuggestion: {
+              appointmentDate: new Date(suggestions[0].slot.date),
+              timeSlot: suggestions[0].slot.timeSlot,
+              serviceCenter: suggestions[0].center.name,
+              serviceCenterId: suggestions[0].center.serviceCenterId,
+              distanceKm: Math.round(suggestions[0].distanceKm * 10) / 10,
+              score: suggestions[0].scoring.totalScore,
+              reason: generateReason(suggestions[0], 0)
+            },
+            alternativeSuggestions: suggestions.slice(1).map((s, i) => ({
+              appointmentDate: new Date(s.slot.date),
+              timeSlot: s.slot.timeSlot,
+              serviceCenter: s.center.name,
+              serviceCenterId: s.center.serviceCenterId,
+              distanceKm: Math.round(s.distanceKm * 10) / 10,
+              score: s.scoring.totalScore,
+              reason: generateReason(s, i + 1)
+            })),
+            suggestedAt: new Date(),
+            userApprovalRequired: true
+          },
+          'metadata.schedulingSuggestionsReady': true,
+          'metadata.awaitingUserApproval': true
+        },
+        { new: true }
+      );
+      console.log('   💾 Suggestions saved to Case');
+    }
+
+    // ─── 8. LOG SUMMARY ──────────────────────────────────────────
+
+    console.log('');
+    console.log('   ┌──────────────────────────────────────────────────────┐');
+    console.log('   │  📅 SCHEDULING SUGGESTIONS                          │');
+    console.log('   ├──────────────────────────────────────────────────────┤');
+    for (const s of result.suggestions) {
+      console.log(`   │  #${s.rank} [${s.label}] Score: ${s.score}`);
+      console.log(`   │     📍 ${s.serviceCenter.name} (${s.distanceKm}km)`);
+      console.log(`   │     📅 ${s.slot.date} @ ${s.slot.timeSlot} (in ${s.slot.daysFromNow}d)`);
+      console.log(`   │     ⭐ ${s.serviceCenter.rating}/5 (${s.serviceCenter.ratingCount} reviews)`);
+    }
+    console.log('   └──────────────────────────────────────────────────────┘');
+    console.log('');
+    console.log(`✅ Scheduling Agent v2 complete (${executionMs}ms)`);
 
     return result;
 
   } catch (error) {
-    console.error('❌ Scheduling Agent Error:', error.message);
+    console.error('❌ Scheduling Agent v2 Error:', error.message);
     throw error;
   }
 }
 
-/**
- * Get available service centers (utility function)
- * In production, this would query a database
- */
-function getAvailableServiceCenters() {
-  return [
-    { id: 'SC-001', name: 'Downtown Service Center', location: 'Downtown', specialties: ['All makes'] },
-    { id: 'SC-002', name: 'North Auto Care', location: 'North District', specialties: ['Electric vehicles', 'Tesla'] },
-    { id: 'SC-003', name: 'Express Auto Repair', location: 'West Side', specialties: ['Emergency service'] },
-    { id: 'SC-004', name: 'Premium Motors Service', location: 'East District', specialties: ['Luxury vehicles', 'Ford', 'Toyota'] }
-  ];
-}
+// ─────────────────────────────────────────────────────────────
+// EXPORTS
+// ─────────────────────────────────────────────────────────────
 
 module.exports = {
   schedulingAgent,
-  createSaveSchedulingSuggestionTool,
-  getAvailableServiceCenters
+  // Export internals for unit testing
+  haversineKm,
+  scoreDistance,
+  scoreSpecialization,
+  scoreUrgencyFit,
+  scoreRating,
+  scoreLoadBalance,
+  scorePreference,
+  calculateCompositeScore,
+  getUrgencyWindow,
+  DEFAULT_WEIGHTS,
+  CRITICAL_WEIGHTS
 };

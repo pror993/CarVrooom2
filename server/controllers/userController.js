@@ -34,8 +34,9 @@ exports.getProfile = async (req, res) => {
 // @access  Private
 exports.updateProfile = async (req, res) => {
     try {
-        const allowedFields = ['name', 'phone', 'address', 'companyName', 'gstNumber',
-            'centerName', 'skills', 'certificationLevel'];
+        const allowedFields = ['name', 'phone', 'address', 'location', 'companyName', 'gstNumber',
+            'serviceCenterId', 'skills', 'certificationLevel', 'notificationPreferences',
+            'preferredServiceCenter', 'assignedServiceCenter'];
 
         const updates = {};
         allowedFields.forEach(field => {

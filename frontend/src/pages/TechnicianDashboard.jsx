@@ -16,7 +16,7 @@ function TechnicianDashboard() {
             {/* Header */}
             <nav className="border-b border-gray-800">
                 <div className="max-w-7xl mx-auto px-6 py-4 flex justify-between items-center">
-                    <h1 className="text-2xl font-bold">CarVrooom Technician Portal</h1>
+                    <h1 className="text-2xl font-bold">AfterCare AI™ Technician Portal</h1>
                     <button
                         onClick={handleLogout}
                         className="flex items-center gap-2 px-4 py-2 bg-gray-800 hover:bg-gray-700 rounded-md transition-colors"

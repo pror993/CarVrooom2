@@ -29,6 +29,19 @@ const userProfileSchema = new mongoose.Schema({
         state: String,
         zip: String
     },
+    // GeoJSON location for distance-based scheduling
+    // Used by scheduling agent to calculate distance to service centers
+    location: {
+        type: {
+            type: String,
+            enum: ['Point'],
+            default: 'Point'
+        },
+        coordinates: {
+            type: [Number], // [longitude, latitude] — GeoJSON standard
+            default: [0, 0]
+        }
+    },
 
     // For vehicle_owner
     vehicleIds: [{
@@ -39,6 +52,18 @@ const userProfileSchema = new mongoose.Schema({
         type: mongoose.Schema.Types.ObjectId,
         ref: 'ServiceCenter'
     },
+    notificationPreferences: {
+        channel: {
+            type: String,
+            enum: ['sms', 'email', 'push', 'whatsapp'],
+            default: 'sms'
+        },
+        urgentChannel: {
+            type: String,
+            enum: ['sms', 'email', 'push', 'whatsapp'],
+            default: 'sms'
+        }
+    },
 
     // For fleet_owner
     fleetId: {
@@ -48,29 +73,22 @@ const userProfileSchema = new mongoose.Schema({
     companyName: String,
     gstNumber: String,
 
-    // For service_center
-    centerName: String,
-    centerLocation: {
-        type: {
-            type: String,
-            enum: ['Point'],
-            default: 'Point'
-        },
-        coordinates: {
-            type: [Number], // [longitude, latitude]
-            default: [0, 0]
-        }
-    },
-    certifications: [String],
-    technicianIds: [{
+    // For service_center — links to the ServiceCenter document
+    // The actual center details (slots, hours, capacity) live in ServiceCenter model
+    // This just connects the user account to the center they manage
+    serviceCenterId: {
         type: mongoose.Schema.Types.ObjectId,
-        ref: 'User'
-    }],
+        ref: 'ServiceCenter'
+    },
 
     // For technician
     employerId: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'User'
+    },
+    assignedServiceCenter: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'ServiceCenter'
     },
     skills: [String],
     certificationLevel: String
@@ -79,7 +97,11 @@ const userProfileSchema = new mongoose.Schema({
     timestamps: true
 });
 
-// Index for geospatial queries
-userProfileSchema.index({ centerLocation: '2dsphere' });
+// Index for geospatial queries (find nearby service centers for users)
+userProfileSchema.index({ location: '2dsphere' });
+// Index for role-based queries
+userProfileSchema.index({ role: 1 });
+// Index for service center link
+userProfileSchema.index({ serviceCenterId: 1 });
 
 module.exports = mongoose.model('UserProfile', userProfileSchema);

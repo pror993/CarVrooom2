@@ -1,356 +1,338 @@
 /**
- * Scheduling Agent Test Controller
+ * Test: Scheduling Agent v2 — Algorithmic Scoring
  * 
- * This controller:
- * 1. Creates a test Case
- * 2. Runs DiagnosticAgent
- * 3. Runs SchedulingAgent with suggestion tool
- * 4. Verifies scheduling suggestions were saved in Case (NOT auto-booked)
- * 5. Shows that user approval is required before appointment is confirmed
+ * Tests the new scheduling algorithm against the seeded Haryana data:
+ *  - Fleet owner in Gurugram [77.0890, 28.4947]
+ *  - 5 Service centers across Haryana
+ *  - 130 slots each (30 days)
  * 
  * Run: node testSchedulingAgent.js
  */
 
-const mongoose = require('mongoose');
 require('dotenv').config();
-const { diagnosticAgent } = require('./agents/diagnosticAgent');
-const { schedulingAgent, getAvailableServiceCenters } = require('./agents/schedulingAgent');
+const mongoose = require('mongoose');
+const connectDB = require('./config/db');
+const { 
+  schedulingAgent, 
+  haversineKm, 
+  scoreDistance, 
+  scoreSpecialization, 
+  scoreUrgencyFit, 
+  getUrgencyWindow,
+  DEFAULT_WEIGHTS,
+  CRITICAL_WEIGHTS
+} = require('./agents/schedulingAgent');
+const ServiceCenter = require('./models/ServiceCenter');
+const UserProfile = require('./models/UserProfile');
 const Vehicle = require('./models/Vehicle');
 const PredictionEvent = require('./models/PredictionEvent');
-const Case = require('./models/Case');
 
-async function testSchedulingAgentController() {
+let passed = 0;
+let failed = 0;
+
+function assert(condition, message) {
+  if (condition) {
+    console.log(`   ✅ ${message}`);
+    passed++;
+  } else {
+    console.log(`   ❌ FAIL: ${message}`);
+    failed++;
+  }
+}
+
+async function runTests() {
   try {
+    await connectDB();
+    console.log('');
     console.log('═══════════════════════════════════════════════════════════');
-    console.log('📅 SCHEDULING AGENT TEST CONTROLLER');
+    console.log('🧪 SCHEDULING AGENT v2 — TEST SUITE');
     console.log('═══════════════════════════════════════════════════════════\n');
-    
-    // Connect to MongoDB
-    console.log('📡 Connecting to MongoDB...');
-    await mongoose.connect(process.env.MONGODB_URI);
-    console.log('✅ Connected to MongoDB\n');
 
-    // ═══════════════════════════════════════════════════════════════
-    // STEP 1: SETUP TEST DATA
-    // ═══════════════════════════════════════════════════════════════
-    console.log('═══════════════════════════════════════════════════════════');
-    console.log('📋 STEP 1: Setting Up Test Data');
-    console.log('═══════════════════════════════════════════════════════════\n');
-    
-    let vehicle = await Vehicle.findOne().sort({ createdAt: -1 });
-    
-    if (!vehicle) {
-      vehicle = await Vehicle.create({
-        vehicleId: `VEHICLE-${Date.now()}`,
-        owner: {
-          name: 'John Doe',
-          contact: '+1234567890',
-          preferredChannel: 'app'
-        },
-        vehicleInfo: {
-          make: 'Toyota',
-          model: 'Camry',
-          year: 2022,
-          powertrain: 'Gasoline'
-        },
-        usageProfile: {
-          avgDailyKm: 75,
-          loadPattern: 'normal'
-        },
+    // ─────────────────────────────────────────────────────────────
+    // TEST 1: Haversine Distance
+    // ─────────────────────────────────────────────────────────────
+    console.log('📐 TEST 1: Haversine Distance Calculations');
+    console.log('─────────────────────────────────────────────────────────');
+
+    // Gurugram → Faridabad (~30km)
+    const gurgaonToFaridabad = haversineKm(77.0890, 28.4947, 77.3178, 28.4089);
+    console.log(`   Gurugram → Faridabad: ${gurgaonToFaridabad.toFixed(1)} km`);
+    assert(gurgaonToFaridabad > 20 && gurgaonToFaridabad < 40, `Distance realistic (${gurgaonToFaridabad.toFixed(1)}km, expected 20-40km)`);
+
+    // Gurugram → Rohtak (~70km)
+    const gurgaonToRohtak = haversineKm(77.0890, 28.4947, 76.6066, 28.8955);
+    console.log(`   Gurugram → Rohtak: ${gurgaonToRohtak.toFixed(1)} km`);
+    assert(gurgaonToRohtak > 50 && gurgaonToRohtak < 90, `Distance realistic (${gurgaonToRohtak.toFixed(1)}km, expected 50-90km)`);
+
+    // Gurugram → Hisar (~165km)
+    const gurgaonToHisar = haversineKm(77.0890, 28.4947, 75.7217, 29.1492);
+    console.log(`   Gurugram → Hisar: ${gurgaonToHisar.toFixed(1)} km`);
+    assert(gurgaonToHisar > 130 && gurgaonToHisar < 180, `Distance realistic (${gurgaonToHisar.toFixed(1)}km, expected 130-180km)`);
+
+    // Gurugram HQ → Gurugram SC (~7km)
+    const gurgaonToLocal = haversineKm(77.0890, 28.4947, 77.0266, 28.4595);
+    console.log(`   Gurugram HQ → Gurugram SC: ${gurgaonToLocal.toFixed(1)} km`);
+    assert(gurgaonToLocal > 3 && gurgaonToLocal < 15, `Distance realistic (${gurgaonToLocal.toFixed(1)}km, expected 3-15km)`);
+
+    console.log('');
+
+    // ─────────────────────────────────────────────────────────────
+    // TEST 2: Scoring Functions
+    // ─────────────────────────────────────────────────────────────
+    console.log('📊 TEST 2: Individual Scoring Functions');
+    console.log('─────────────────────────────────────────────────────────');
+
+    assert(scoreDistance(0) === 1.0, 'Distance 0km = 1.0');
+    assert(scoreDistance(75, 150) === 0.5, 'Distance 75km (max 150) = 0.5');
+    assert(scoreDistance(150, 150) === 0, 'Distance 150km (max 150) = 0.0');
+    assert(scoreDistance(200, 150) === 0, 'Distance 200km (max 150) = 0.0');
+
+    assert(scoreSpecialization(['Tata Motors', 'General maintenance'], 'Tata', 'diesel') === 1.0, 'Make "Tata" matches "Tata Motors"');
+    assert(scoreSpecialization(['EV Diagnostics', 'Battery Systems'], 'Tesla', 'electric') === 1.0, 'EV powertrain matches EV specs');
+    assert(scoreSpecialization(['General maintenance', 'Oil Change'], 'BMW', 'petrol') === 0.5, 'General maintenance = 0.5');
+    assert(scoreSpecialization(['Toyota', 'Honda'], 'BMW', 'petrol') === 0.2, 'No match = 0.2');
+
+    const medWindow = getUrgencyWindow('medium', 30);
+    assert(scoreUrgencyFit(10, medWindow, 30) === 1.0, 'Day 10 within medium window = 1.0');
+    assert(scoreUrgencyFit(1, medWindow, 30) === 0.7, 'Day 1 (before window) = 0.7');
+    assert(scoreUrgencyFit(35, medWindow, 30) === 0.1, 'Day 35 (after ETA 30) = 0.1');
+
+    console.log('');
+
+    // ─────────────────────────────────────────────────────────────
+    // TEST 3: Urgency Windows
+    // ─────────────────────────────────────────────────────────────
+    console.log('⚡ TEST 3: Urgency Window Calculations');
+    console.log('─────────────────────────────────────────────────────────');
+
+    const critWindow = getUrgencyWindow('critical', 10);
+    assert(critWindow.minDays === 0 && critWindow.maxDays === 2, `Critical: [${critWindow.minDays}, ${critWindow.maxDays}]`);
+
+    const highWindow = getUrgencyWindow('high', 15);
+    assert(highWindow.minDays === 1 && highWindow.maxDays <= 7, `High (ETA 15): [${highWindow.minDays}, ${highWindow.maxDays}]`);
+
+    const medWindow2 = getUrgencyWindow('medium', 30);
+    assert(medWindow2.minDays === 3, `Medium (ETA 30) minDays: ${medWindow2.minDays}`);
+    assert(medWindow2.maxDays === 15, `Medium (ETA 30) maxDays: ${medWindow2.maxDays}`);
+
+    const lowWindow = getUrgencyWindow('low', 60);
+    assert(lowWindow.minDays === 7, `Low (ETA 60) minDays: ${lowWindow.minDays}`);
+    assert(lowWindow.maxDays === 48, `Low (ETA 60) maxDays: ${lowWindow.maxDays}`);
+
+    console.log('');
+
+    // ─────────────────────────────────────────────────────────────
+    // TEST 4: Weight Configurations
+    // ─────────────────────────────────────────────────────────────
+    console.log('⚖️  TEST 4: Weight Configurations');
+    console.log('─────────────────────────────────────────────────────────');
+
+    const defaultSum = Object.values(DEFAULT_WEIGHTS).reduce((a, b) => a + b, 0);
+    assert(Math.abs(defaultSum - 1.0) < 0.001, `Default weights sum to ${defaultSum.toFixed(2)} (expected 1.0)`);
+
+    const critSum = Object.values(CRITICAL_WEIGHTS).reduce((a, b) => a + b, 0);
+    assert(Math.abs(critSum - 1.0) < 0.001, `Critical weights sum to ${critSum.toFixed(2)} (expected 1.0)`);
+
+    assert(CRITICAL_WEIGHTS.urgencyFit > DEFAULT_WEIGHTS.urgencyFit, 'Critical: urgency weight > default');
+    assert(CRITICAL_WEIGHTS.distance < DEFAULT_WEIGHTS.distance, 'Critical: distance weight < default');
+
+    console.log('');
+
+    // ─────────────────────────────────────────────────────────────
+    // TEST 5: Full Algorithm — Medium Severity (Tata Nexon EV)
+    // ─────────────────────────────────────────────────────────────
+    console.log('🔧 TEST 5: Full Algorithm — Medium Severity (Tata Nexon EV, ETA 18d)');
+    console.log('─────────────────────────────────────────────────────────');
+
+    const centerCount = await ServiceCenter.countDocuments({ isActive: true });
+    assert(centerCount >= 5, `Found ${centerCount} active service centers`);
+
+    const fleetProfile = await UserProfile.findOne({ role: 'fleet_owner' }).lean();
+    assert(fleetProfile !== null, 'Fleet owner profile found');
+    if (fleetProfile) {
+      assert(fleetProfile.location.coordinates[0] !== 0, `User lon: ${fleetProfile.location.coordinates[0]}`);
+    }
+
+    // Create test vehicle
+    let testVehicle = await Vehicle.findOne({ vehicleId: 'TEST-SCHED-V1' });
+    if (!testVehicle) {
+      testVehicle = await Vehicle.create({
+        vehicleId: 'TEST-SCHED-V1',
+        owner: { name: 'Scheduling Test', contact: '+91-9999900000', preferredChannel: 'app' },
+        vehicleInfo: { make: 'Tata', model: 'Nexon EV', year: 2024, powertrain: 'electric' },
+        usageProfile: { avgDailyKm: 55, loadPattern: 'normal' },
         serviceHistory: []
       });
     }
 
-    let prediction = await PredictionEvent.findOne({ 
-      vehicleId: vehicle.vehicleId 
-    }).sort({ createdAt: -1 });
-    
-    if (!prediction) {
-      prediction = await PredictionEvent.create({
-        vehicleId: vehicle.vehicleId,
-        predictionType: 'cascade_failure',
-        confidence: 0.87,
-        etaDays: 10,
-        signals: {
-          engineVibration: { value: 8.5, unit: 'hz', threshold: 5.0 },
-          oilPressure: { value: 28, unit: 'psi', threshold: 40 },
-          coolantTemp: { value: 210, unit: 'F', threshold: 195 }
-        }
-      });
+    // Create test prediction
+    const testPrediction = await PredictionEvent.create({
+      vehicleId: 'TEST-SCHED-V1',
+      predictionType: 'single_failure',
+      confidence: 0.82,
+      etaDays: 18,
+      signals: { battery_voltage: 11.2, coolant_temp: 102 }
+    });
+
+    const mediumResult = await schedulingAgent({
+      diagnosticResult: {
+        urgency: 'medium',
+        risk: 'medium',
+        summary: 'Battery voltage declining. Coolant temperature elevated.'
+      },
+      vehicle: testVehicle,
+      prediction: testPrediction,
+      caseId: null,
+      userId: null,
+      userProfile: fleetProfile
+    });
+
+    assert(mediumResult.suggestions.length >= 2, `Got ${mediumResult.suggestions.length} suggestions (need >= 2)`);
+    assert(mediumResult.schedulingUrgency === 'medium', `Urgency: ${mediumResult.schedulingUrgency}`);
+    assert(mediumResult.algorithm === 'weighted_multi_factor_v2', `Algorithm: ${mediumResult.algorithm}`);
+    assert(mediumResult.executionTimeMs < 1000, `Execution: ${mediumResult.executionTimeMs}ms (< 1s)`);
+    assert(mediumResult.userApprovalRequired === true, 'User approval required');
+
+    // Check suggestion structure
+    const s1 = mediumResult.suggestions[0];
+    assert(s1.rank === 1, 'First suggestion rank = 1');
+    assert(s1.label === 'best_overall', `First label: ${s1.label}`);
+    assert(s1.score > 0 && s1.score <= 1, `Score in range: ${s1.score}`);
+    assert(s1.serviceCenter.id !== undefined, 'Has center ID');
+    assert(s1.slot.date !== undefined, `Has date: ${s1.slot.date}`);
+    assert(s1.slot.timeSlot !== undefined, `Has timeSlot: ${s1.slot.timeSlot}`);
+    assert(s1.distanceKm !== undefined, `Has distance: ${s1.distanceKm}km`);
+    assert(s1.scoreBreakdown !== undefined, 'Has score breakdown');
+    assert(s1.reason.length > 0, 'Has reason text');
+
+    // For Tata EV from Gurugram, Gurugram EV center should appear
+    const hasGurugram = mediumResult.suggestions.some(s => s.serviceCenter.city === 'Gurugram');
+    assert(hasGurugram, 'Gurugram center in suggestions (closest + EV match)');
+
+    // Diversity: at least 2 different centers
+    const uniqueCenters = new Set(mediumResult.suggestions.map(s => s.serviceCenter.id));
+    assert(uniqueCenters.size >= 2, `${uniqueCenters.size} unique centers (diversity ✓)`);
+
+    // Backward-compat fields
+    assert(mediumResult.primaryRecommendation.date !== undefined, 'primaryRecommendation.date exists');
+    assert(mediumResult.primaryRecommendation.serviceCenter !== undefined, 'primaryRecommendation.serviceCenter exists');
+    assert(mediumResult.alternativeRecommendations.length >= 1, `${mediumResult.alternativeRecommendations.length} alternatives`);
+
+    console.log('');
+
+    // ─────────────────────────────────────────────────────────────
+    // TEST 6: Full Algorithm — Critical Severity
+    // ─────────────────────────────────────────────────────────────
+    console.log('🚨 TEST 6: Full Algorithm — Critical Severity (ETA 5d)');
+    console.log('─────────────────────────────────────────────────────────');
+
+    const critPrediction = await PredictionEvent.create({
+      vehicleId: 'TEST-SCHED-V1',
+      predictionType: 'cascade_failure',
+      confidence: 0.95,
+      etaDays: 5,
+      signals: { battery_voltage: 9.8, coolant_temp: 120, oil_pressure: 15 }
+    });
+
+    const critResult = await schedulingAgent({
+      diagnosticResult: {
+        urgency: 'critical',
+        risk: 'critical',
+        summary: 'Imminent cascade failure. Battery critically low.'
+      },
+      vehicle: testVehicle,
+      prediction: critPrediction,
+      caseId: null,
+      userId: null,
+      userProfile: fleetProfile
+    });
+
+    assert(critResult.schedulingUrgency === 'critical', `Urgency: ${critResult.schedulingUrgency}`);
+    assert(critResult.suggestions.length >= 2, `Got ${critResult.suggestions.length} suggestions`);
+
+    const critPrimary = critResult.suggestions[0];
+    assert(critPrimary.slot.daysFromNow <= 5, `Critical primary in ${critPrimary.slot.daysFromNow} days (≤ 5)`);
+
+    // Emergency bonus check
+    const emergencySuggestion = critResult.suggestions.find(s => s.serviceCenter.isEmergency);
+    if (emergencySuggestion) {
+      assert(emergencySuggestion.scoreBreakdown.emergencyBonus === 0.15, 'Emergency +0.15 bonus applied');
     }
 
-    // Create a Case
-    const testCase = await Case.create({
-      caseId: `CASE-TEST-${Date.now()}`,
-      vehicleId: vehicle.vehicleId,
-      predictionId: prediction._id,
-      severity: 'medium',
-      state: 'RECEIVED'
+    assert(critResult.searchParams.weightsUsed.urgencyFit === 0.40, 'Critical weights used (urgencyFit=0.40)');
+
+    console.log('');
+
+    // ─────────────────────────────────────────────────────────────
+    // TEST 7: Score Breakdown Verification
+    // ─────────────────────────────────────────────────────────────
+    console.log('🔍 TEST 7: Score Breakdown Verification');
+    console.log('─────────────────────────────────────────────────────────');
+
+    const breakdown = mediumResult.suggestions[0].scoreBreakdown;
+    assert(breakdown.distance !== undefined, 'Has distance breakdown');
+    assert(breakdown.specialization !== undefined, 'Has specialization breakdown');
+    assert(breakdown.urgencyFit !== undefined, 'Has urgencyFit breakdown');
+    assert(breakdown.rating !== undefined, 'Has rating breakdown');
+    assert(breakdown.loadBalance !== undefined, 'Has loadBalance breakdown');
+    assert(breakdown.preference !== undefined, 'Has preference breakdown');
+
+    const weightedSum = breakdown.distance.weighted + breakdown.specialization.weighted +
+      breakdown.urgencyFit.weighted + breakdown.rating.weighted +
+      breakdown.loadBalance.weighted + breakdown.preference.weighted + breakdown.emergencyBonus;
+    const totalScore = mediumResult.suggestions[0].score;
+    const scoreDiff = Math.abs(weightedSum - totalScore);
+    assert(scoreDiff < 0.05, `Weighted sum (${weightedSum.toFixed(3)}) ≈ total (${totalScore}) diff=${scoreDiff.toFixed(4)}`);
+
+    console.log('');
+
+    // ─────────────────────────────────────────────────────────────
+    // TEST 8: No User Location Fallback
+    // ─────────────────────────────────────────────────────────────
+    console.log('📍 TEST 8: No User Location Fallback');
+    console.log('─────────────────────────────────────────────────────────');
+
+    const noLocResult = await schedulingAgent({
+      diagnosticResult: { urgency: 'low', risk: 'low', summary: 'Minor issue.' },
+      vehicle: testVehicle,
+      prediction: testPrediction,
+      caseId: null,
+      userId: null,
+      userProfile: null
     });
 
-    console.log('✅ Test data created:');
-    console.log(`   Vehicle: ${vehicle.vehicleInfo.make} ${vehicle.vehicleInfo.model} ${vehicle.vehicleInfo.year}`);
-    console.log(`   Prediction: ${prediction.predictionType} (${(prediction.confidence * 100).toFixed(1)}%, ETA: ${prediction.etaDays} days)`);
-    console.log(`   Case ID: ${testCase.caseId}\n`);
+    assert(noLocResult.suggestions.length >= 2, `Got ${noLocResult.suggestions.length} suggestions without location`);
+    assert(noLocResult.searchParams.userLocation === null, 'userLocation = null');
+    assert(noLocResult.suggestions[0].distanceKm === 0, 'Distance = 0 when no location');
 
-    // ═══════════════════════════════════════════════════════════════
-    // STEP 2: RUN DIAGNOSTIC AGENT
-    // ═══════════════════════════════════════════════════════════════
+    console.log('');
+
+    // ─────────────────────────────────────────────────────────────
+    // CLEANUP
+    // ─────────────────────────────────────────────────────────────
+    await Vehicle.deleteOne({ vehicleId: 'TEST-SCHED-V1' });
+    await PredictionEvent.deleteMany({ vehicleId: 'TEST-SCHED-V1' });
+    console.log('🧹 Test data cleaned up');
+
+    // ─────────────────────────────────────────────────────────────
+    // SUMMARY
+    // ─────────────────────────────────────────────────────────────
+    console.log('');
     console.log('═══════════════════════════════════════════════════════════');
-    console.log('🔍 STEP 2: Running Diagnostic Agent');
+    console.log(`📊 RESULTS: ${passed} passed, ${failed} failed out of ${passed + failed}`);
     console.log('═══════════════════════════════════════════════════════════\n');
 
-    const diagnosis = await diagnosticAgent(prediction, vehicle);
-    
-    console.log('✅ Diagnostic complete:');
-    console.log(`   Risk: ${diagnosis.risk.toUpperCase()}`);
-    console.log(`   Urgency: ${diagnosis.urgency.toUpperCase()}`);
-    console.log(`   Summary: ${diagnosis.summary.substring(0, 80)}...\n`);
-
-    // ═══════════════════════════════════════════════════════════════
-    // STEP 3: DISPLAY AVAILABLE SERVICE CENTERS
-    // ═══════════════════════════════════════════════════════════════
-    console.log('═══════════════════════════════════════════════════════════');
-    console.log('🏢 STEP 3: Available Service Centers');
-    console.log('═══════════════════════════════════════════════════════════\n');
-
-    const serviceCenters = getAvailableServiceCenters();
-    serviceCenters.forEach((sc, index) => {
-      console.log(`   ${index + 1}. ${sc.name}`);
-      console.log(`      Location: ${sc.location}`);
-      console.log(`      Specialties: ${sc.specialties.join(', ')}`);
-      console.log('');
-    });
-
-    // ═══════════════════════════════════════════════════════════════
-    // STEP 4: RUN SCHEDULING AGENT
-    // ═══════════════════════════════════════════════════════════════
-    console.log('═══════════════════════════════════════════════════════════');
-    console.log('📅 STEP 4: Running Scheduling Agent');
-    console.log('═══════════════════════════════════════════════════════════\n');
-
-    const startTime = Date.now();
-    const schedule = await schedulingAgent(
-      diagnosis,
-      vehicle,
-      prediction,
-      testCase.caseId
-    );
-    const duration = Date.now() - startTime;
-
-    // ═══════════════════════════════════════════════════════════════
-    // STEP 5: DISPLAY SCHEDULING RESULT
-    // ═══════════════════════════════════════════════════════════════
-    console.log('\n═══════════════════════════════════════════════════════════');
-    console.log('📊 STEP 5: Scheduling Decision (Structured Output)');
-    console.log('═══════════════════════════════════════════════════════════\n');
-
-    // Summary Box
-    console.log('┌─────────────────────────────────────────────────────────┐');
-    console.log('│             SCHEDULING SUGGESTIONS GENERATED             │');
-    console.log('├─────────────────────────────────────────────────────────┤');
-    console.log(`│  Urgency Level:        ${schedule.schedulingUrgency.padEnd(29)} │`);
-    console.log(`│  Primary Date:         ${schedule.primaryRecommendation.date.padEnd(29)} │`);
-    console.log(`│  Days Until Appt:      ${String(schedule.daysUntilPrimaryAppointment).padEnd(29)} │`);
-    console.log(`│  Primary Center:       ${schedule.primaryRecommendation.serviceCenter.substring(0, 29).padEnd(29)} │`);
-    console.log(`│  Alternatives:         ${String(schedule.alternativeRecommendations.length).padEnd(29)} │`);
-    console.log(`│  Tool Called:          ${(schedule.toolCalled ? 'Yes' : 'No').padEnd(29)} │`);
-    console.log(`│  User Approval Req:    ${(schedule.userApprovalRequired ? 'Yes ⚠️' : 'No').padEnd(29)} │`);
-    console.log(`│  Suggestions Saved:    ${(schedule.suggestionsSaved ? 'Yes' : 'No').padEnd(29)} │`);
-    console.log(`│  Processing Time:      ${(duration + 'ms').padEnd(29)} │`);
-    console.log('└─────────────────────────────────────────────────────────┘\n');
-
-    // Urgency Analysis
-    const urgencyEmoji = {
-      low: '📅',
-      medium: '⏰',
-      high: '⚡',
-      critical: '🚨'
-    };
-    console.log(`${urgencyEmoji[schedule.schedulingUrgency]} SCHEDULING URGENCY: ${schedule.schedulingUrgency.toUpperCase()}`);
-    
-    if (schedule.schedulingUrgency === 'critical') {
-      console.log('   → Emergency appointment within 24-48 hours');
-    } else if (schedule.schedulingUrgency === 'high') {
-      console.log('   → Priority appointment within 3-7 days');
-    } else if (schedule.schedulingUrgency === 'medium') {
-      console.log('   → Standard appointment within 2-4 weeks');
-    } else {
-      console.log('   → Routine appointment within 4-8 weeks');
+    if (failed > 0) {
+      process.exitCode = 1;
     }
-    console.log('');
-
-    // Appointment Details
-    console.log('📅 PRIMARY RECOMMENDATION:\n');
-    console.log(`   Date:            ${schedule.primaryRecommendation.date}`);
-    console.log(`   Service Center:  ${schedule.primaryRecommendation.serviceCenter}`);
-    console.log(`   Center ID:       ${schedule.primaryRecommendation.serviceCenterId}`);
-    console.log(`   Location:        ${schedule.primaryRecommendation.location}`);
-    console.log(`   Days from now:   ${schedule.daysUntilPrimaryAppointment} days`);
-    console.log(`   ETA to failure:  ${prediction.etaDays} days`);
-    console.log(`   Safety margin:   ${schedule.safetyMargin} days\n`);
-
-    // Reasoning
-    console.log('💡 PRIMARY REASONING:\n');
-    const reasoningLines = schedule.primaryRecommendation.reasoning.match(/.{1,70}(\s|$)/g) || [schedule.primaryRecommendation.reasoning];
-    reasoningLines.forEach(line => {
-      console.log(`   ${line.trim()}`);
-    });
-    console.log('');
-
-    // Alternative Options
-    console.log('🔄 ALTERNATIVE OPTIONS:\n');
-    schedule.alternativeRecommendations.forEach((alt, index) => {
-      console.log(`   ${index + 1}. ${alt.date} at ${alt.serviceCenter}`);
-      console.log(`      Location: ${alt.location}`);
-      console.log(`      Reasoning: ${alt.reasoning}`);
-      console.log('');
-    });
-
-    // Additional Notes
-    console.log('📝 USER GUIDANCE:\n');
-    console.log(`   ${schedule.additionalNotes}\n`);
-
-    // Next Steps
-    console.log('🔄 NEXT STEPS:\n');
-    schedule.nextSteps.forEach((step, index) => {
-      console.log(`   ${index + 1}. ${step}`);
-    });
-    console.log('');
-
-    // ═══════════════════════════════════════════════════════════════
-    // STEP 6: VERIFY CASE STORAGE
-    // ═══════════════════════════════════════════════════════════════
-    console.log('═══════════════════════════════════════════════════════════');
-    console.log('🔍 STEP 6: Verifying Case Storage');
-    console.log('═══════════════════════════════════════════════════════════\n');
-
-    const updatedCase = await Case.findOne({ caseId: testCase.caseId });
-    
-    if (updatedCase.agentResults?.schedulingAgent) {
-      console.log('✅ Scheduling suggestions stored in Case:\n');
-      console.log('   Case ID:', updatedCase.caseId);
-      console.log('   Status:', updatedCase.agentResults.schedulingAgent.status);
-      console.log('   User Approval Required:', updatedCase.agentResults.schedulingAgent.userApprovalRequired);
-      console.log('');
-      console.log('   Primary Suggestion:');
-      console.log('      Date:', updatedCase.agentResults.schedulingAgent.primarySuggestion.appointmentDate);
-      console.log('      Service Center:', updatedCase.agentResults.schedulingAgent.primarySuggestion.serviceCenter);
-      console.log('      Reason:', updatedCase.agentResults.schedulingAgent.primarySuggestion.reason.substring(0, 60) + '...');
-      console.log('');
-      console.log(`   Alternative Suggestions: ${updatedCase.agentResults.schedulingAgent.alternativeSuggestions.length}`);
-      updatedCase.agentResults.schedulingAgent.alternativeSuggestions.forEach((alt, i) => {
-        console.log(`      ${i + 1}. ${alt.appointmentDate} at ${alt.serviceCenter}`);
-      });
-      console.log('');
-      console.log('   Metadata Flags:');
-      console.log('      Suggestions Ready:', updatedCase.metadata?.schedulingSuggestionsReady || false);
-      console.log('      Awaiting User Approval:', updatedCase.metadata?.awaitingUserApproval || false);
-      console.log('');
-    } else {
-      console.log('❌ ERROR: Scheduling data NOT found in Case!\n');
-    }
-
-    // ═══════════════════════════════════════════════════════════════
-    // STEP 7: RAW JSON OUTPUT
-    // ═══════════════════════════════════════════════════════════════
-    console.log('═══════════════════════════════════════════════════════════');
-    console.log('📄 RAW JSON OUTPUT');
-    console.log('═══════════════════════════════════════════════════════════\n');
-    console.log(JSON.stringify(schedule, null, 2));
-    console.log('');
-
-    // ═══════════════════════════════════════════════════════════════
-    // STEP 8: INTEGRATION EXAMPLE
-    // ═══════════════════════════════════════════════════════════════
-    console.log('═══════════════════════════════════════════════════════════');
-    console.log('💻 INTEGRATION EXAMPLE');
-    console.log('═══════════════════════════════════════════════════════════\n');
-
-    console.log('// Complete workflow integration:');
-    console.log('const orchestration = await masterAgent(prediction, vehicle);');
-    console.log('');
-    console.log('if (orchestration.agentsToInvoke.includes("DiagnosticAgent")) {');
-    console.log('  const diagnosis = await diagnosticAgent(prediction, vehicle);');
-    console.log('  ');
-    console.log('  if (orchestration.agentsToInvoke.includes("SchedulerAgent")) {');
-    console.log('    const schedule = await schedulingAgent(');
-    console.log('      diagnosis,');
-    console.log('      vehicle,');
-    console.log('      prediction,');
-    console.log('      caseId  // Tool will store suggestions in Case');
-    console.log('    );');
-    console.log('    ');
-    console.log('    // Frontend displays suggestions to user');
-    console.log('    // User selects preferred option');
-    console.log('    // User approval endpoint called:');
-    console.log('    await approveAppointment({');
-    console.log('      caseId,');
-    console.log('      selectedDate: schedule.primaryRecommendation.date,');
-    console.log('      selectedCenter: schedule.primaryRecommendation.serviceCenter');
-    console.log('    });');
-    console.log('    ');
-    console.log('    // THEN appointment is confirmed');
-    console.log('    await sendAppointmentConfirmation({');
-    console.log(`      customerContact: vehicle.owner.contact,`);
-    console.log(`      appointmentDate: selectedDate,`);
-    console.log(`      serviceCenter: selectedCenter`);
-    console.log('    });');
-    console.log('  }');
-    console.log('}');
-    console.log('');
-
-    // Cleanup
-    console.log('═══════════════════════════════════════════════════════════');
-    console.log('🧹 CLEANUP');
-    console.log('═══════════════════════════════════════════════════════════\n');
-    
-    console.log('Cleaning up test data...');
-    await Case.deleteOne({ caseId: testCase.caseId });
-    console.log('✅ Test case deleted\n');
-
-    console.log('═══════════════════════════════════════════════════════════');
-    console.log('✅ TEST COMPLETED SUCCESSFULLY');
-    console.log('═══════════════════════════════════════════════════════════\n');
-
-    console.log('Test Summary:');
-    console.log(`   ✅ Scheduling Agent determined urgency: ${schedule.schedulingUrgency}`);
-    console.log(`   ✅ Tool called successfully: ${schedule.toolCalled}`);
-    console.log(`   ✅ User approval required: ${schedule.userApprovalRequired}`);
-    console.log(`   ✅ Suggestions saved in Case: ${schedule.suggestionsSaved}`);
-    console.log(`   ✅ Primary date: ${schedule.primaryRecommendation.date}`);
-    console.log(`   ✅ Primary center: ${schedule.primaryRecommendation.serviceCenter}`);
-    console.log(`   ✅ Alternative options: ${schedule.alternativeRecommendations.length}`);
-    console.log(`   ⚠️  Status: pending_user_approval (NOT auto-booked)`);
-    console.log('');
 
   } catch (error) {
-    console.error('\n═══════════════════════════════════════════════════════════');
-    console.error('❌ TEST FAILED');
-    console.error('═══════════════════════════════════════════════════════════\n');
-    console.error('Error:', error.message);
-    if (error.stack) {
-      console.error('\nStack trace:');
-      console.error(error.stack);
-    }
-    throw error;
+    console.error('❌ Test suite error:', error);
+    process.exitCode = 1;
   } finally {
     await mongoose.connection.close();
-    console.log('🔌 MongoDB connection closed\n');
+    console.log('🔌 MongoDB connection closed');
   }
 }
 
-// Run the test controller
-if (require.main === module) {
-  testSchedulingAgentController()
-    .then(() => {
-      console.log('🎉 All operations completed');
-      process.exit(0);
-    })
-    .catch((error) => {
-      console.error('💥 Fatal error:', error);
-      process.exit(1);
-    });
-}
-
-module.exports = testSchedulingAgentController;
+runTests();
