@@ -3,7 +3,8 @@ import pickle
 import numpy as np
 import pandas as pd
 from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+from typing import List
 from tensorflow import keras
 
 # ── Config ───────────────────────────────────────────────────────────────
@@ -66,22 +67,28 @@ def preprocess_inference_data(
 app = FastAPI(title="DPF Prediction API")
 
 
+class TelemetryRecord(BaseModel):
+    """
+    Single telemetry record with exact field names as they appear in raw data.
+    Field names use dot notation (e.g., 'dpf.soot_load_pct_est').
+    """
+    dpf__diff_pressure_kpa_upstream: float = Field(alias="dpf.diff_pressure_kpa_upstream")
+    dpf__diff_pressure_kpa_downstream: float = Field(alias="dpf.diff_pressure_kpa_downstream")
+    dpf__soot_load_pct_est: float = Field(alias="dpf.soot_load_pct_est")
+    dpf__failed_regen_count: int = Field(alias="dpf.failed_regen_count")
+    dpf__pre_dpf_temp_c: float = Field(alias="dpf.pre_dpf_temp_c")
+    dpf__regen_event_flag: int = Field(alias="dpf.regen_event_flag")
+    engine_powertrain__engine_rpm: float = Field(alias="engine_powertrain.engine_rpm")
+    engine_powertrain__engine_load_pct: float = Field(alias="engine_powertrain.engine_load_pct")
+    vehicle_dynamics__speed_kmh: float = Field(alias="vehicle_dynamics.speed_kmh")
+
+    class Config:
+        populate_by_name = True
+
+
 class PredictionRequest(BaseModel):
-    """
-    Expects a list of `SEQ_LEN` (288) rows of raw sensor data.
-    
-    Each row should contain columns like:
-    - vehicle_id, timestamp_utc, odometer_km
-    - dpf.diff_pressure_kpa_upstream, dpf.diff_pressure_kpa_downstream
-    - dpf.soot_load_pct_est, dpf.failed_regen_count, dpf.pre_dpf_temp_c
-    - dpf.regen_event_flag, engine_powertrain.engine_rpm, etc.
-    
-    The preprocessing will:
-    1. Create dpf_delta_p feature
-    2. Select only FEATURE_COLS
-    3. Scale them
-    """
-    data: list[dict]
+    """Expects exactly 288 time-ordered telemetry records."""
+    data: List[TelemetryRecord]
 
 
 class PredictionResponse(BaseModel):
@@ -92,7 +99,7 @@ class PredictionResponse(BaseModel):
 @app.post("/predict", response_model=PredictionResponse)
 def predict(req: PredictionRequest):
     # Build DataFrame from incoming rows
-    df = pd.DataFrame(req.data)
+    df = pd.DataFrame([r.dict(by_alias=True) for r in req.data])
 
     if len(df) != SEQ_LEN:
         raise HTTPException(

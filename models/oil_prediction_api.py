@@ -28,12 +28,12 @@ SCALER_PATH = os.path.join(MODEL_DIR, "oil_lstm_scaler.pkl")
 
 # Model expects 14 engineered features
 FEATURE_COLUMNS = [
-    'engine_oil_level_l',
-    'engine_rpm',
-    'engine_load_pct',
-    'fuel_consumption_lph',
-    'exhaust_backpressure_kpa',
-    'boost_pressure_kpa',
+    'engine_powertrain.oil_level_l',
+    'engine_powertrain.engine_rpm',
+    'engine_powertrain.engine_load_pct',
+    'engine_powertrain.fuel_consumption_lph',
+    'engine_powertrain.exhaust_backpressure_kpa',
+    'engine_powertrain.boost_pressure_kpa',
     'oil_level_change_30d',
     'oil_slope_7d',
     'regen_freq_30d',
@@ -68,31 +68,31 @@ app = FastAPI(
 # RAW INPUT SCHEMA
 # ============================================================
 
-class RawTelemetryInput(BaseModel):
+class TelemetryRecord(BaseModel):
     """
-    Raw telemetry schema.
-    Expected length: 2016 timesteps (7 days of 5-min data)
+    Single telemetry record with exact field names as they appear in raw data.
+    Field names use dot notation.
     """
+    engine_powertrain__oil_level_l: float = Field(alias="engine_powertrain.oil_level_l")
+    engine_powertrain__engine_rpm: float = Field(alias="engine_powertrain.engine_rpm")
+    engine_powertrain__engine_load_pct: float = Field(alias="engine_powertrain.engine_load_pct")
+    engine_powertrain__fuel_consumption_lph: float = Field(alias="engine_powertrain.fuel_consumption_lph")
+    engine_powertrain__exhaust_backpressure_kpa: float = Field(alias="engine_powertrain.exhaust_backpressure_kpa")
+    engine_powertrain__boost_pressure_kpa: float = Field(alias="engine_powertrain.boost_pressure_kpa")
+    dpf__regen_event_flag: int = Field(alias="dpf.regen_event_flag")
+    dpf__failed_regen_count: int = Field(alias="dpf.failed_regen_count")
+    vehicle_dynamics__idle_seconds_since_start: float = Field(alias="vehicle_dynamics.idle_seconds_since_start")
 
-    engine_oil_level_l: List[float]
-    engine_rpm: List[float]
-    engine_load_pct: List[float]
-    fuel_consumption_lph: List[float]
-    exhaust_backpressure_kpa: List[float]
-    boost_pressure_kpa: List[float]
-    dpf_regen_event_flag: List[int]
-    dpf_failed_regen_count: List[int]
-    idle_seconds_since_start: List[float]
-
-    @field_validator("*")
-    @classmethod
-    def validate_length(cls, v):
-        if len(v) != SEQ_LEN:
-            raise ValueError(f"Each field must contain {SEQ_LEN} values")
-        return v
+    class Config:
+        populate_by_name = True
 
 
-class PredictionOutput(BaseModel):
+class OilRequest(BaseModel):
+    """Expects exactly 2016 time-ordered telemetry records (7 days)."""
+    data: List[TelemetryRecord]
+
+
+class OilResponse(BaseModel):
     probability_of_failure: float
 
 
@@ -103,34 +103,34 @@ class PredictionOutput(BaseModel):
 def compute_features(df: pd.DataFrame) -> pd.DataFrame:
 
     # Oil 30d change proxy (if less data, use diff from first)
-    df["oil_level_change_30d"] = df["engine_oil_level_l"] - df["engine_oil_level_l"].iloc[0]
+    df["oil_level_change_30d"] = df["engine_powertrain.oil_level_l"] - df["engine_powertrain.oil_level_l"].iloc[0]
 
     # Oil slope (linear regression over full window)
     x = np.arange(len(df))
-    coef = np.polyfit(x, df["engine_oil_level_l"], 1)[0]
+    coef = np.polyfit(x, df["engine_powertrain.oil_level_l"], 1)[0]
     df["oil_slope_7d"] = coef
 
     # Regen frequency
-    df["regen_freq_30d"] = df["dpf_regen_event_flag"].sum()
+    df["regen_freq_30d"] = df["dpf.regen_event_flag"].sum()
 
     # Failed regen delta
     df["failed_regen_30d"] = (
-        df["dpf_failed_regen_count"].iloc[-1]
-        - df["dpf_failed_regen_count"].iloc[0]
+        df["dpf.failed_regen_count"].iloc[-1]
+        - df["dpf.failed_regen_count"].iloc[0]
     )
 
     # Boost instability
-    df["boost_std_7d"] = df["boost_pressure_kpa"].std()
+    df["boost_std_7d"] = df["engine_powertrain.boost_pressure_kpa"].std()
 
     # Fuel trend
-    coef_fuel = np.polyfit(x, df["fuel_consumption_lph"], 1)[0]
+    coef_fuel = np.polyfit(x, df["engine_powertrain.fuel_consumption_lph"], 1)[0]
     df["fuel_trend_7d"] = coef_fuel
 
     # Idle ratio
-    df["idle_ratio_7d"] = np.mean(np.array(df["idle_seconds_since_start"]) > 0)
+    df["idle_ratio_7d"] = np.mean(np.array(df["vehicle_dynamics.idle_seconds_since_start"]) > 0)
 
     # Backpressure mean
-    df["backpressure_mean_7d"] = df["exhaust_backpressure_kpa"].mean()
+    df["backpressure_mean_7d"] = df["engine_powertrain.exhaust_backpressure_kpa"].mean()
 
     # Broadcast scalar features across sequence
     for col in [
@@ -151,28 +151,24 @@ def compute_features(df: pd.DataFrame) -> pd.DataFrame:
 # PREDICTION ENDPOINT
 # ============================================================
 
-@app.post("/predict", response_model=PredictionOutput)
-def predict(raw_input: RawTelemetryInput):
+@app.post("/predict", response_model=OilResponse)
+def predict(req: OilRequest):
     """
     Predicts oil failure probability from 2016 timesteps (7 days) of raw telemetry.
     """
+
+    if len(req.data) != SEQ_LEN:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Expected {SEQ_LEN} records, got {len(req.data)}"
+        )
 
     try:
         # --------------------------------------------------------
         # 1. Build dataframe
         # Shape: (2016, raw_features)
         # --------------------------------------------------------
-        df = pd.DataFrame({
-            "engine_oil_level_l": raw_input.engine_oil_level_l,
-            "engine_rpm": raw_input.engine_rpm,
-            "engine_load_pct": raw_input.engine_load_pct,
-            "fuel_consumption_lph": raw_input.fuel_consumption_lph,
-            "exhaust_backpressure_kpa": raw_input.exhaust_backpressure_kpa,
-            "boost_pressure_kpa": raw_input.boost_pressure_kpa,
-            "dpf_regen_event_flag": raw_input.dpf_regen_event_flag,
-            "dpf_failed_regen_count": raw_input.dpf_failed_regen_count,
-            "idle_seconds_since_start": raw_input.idle_seconds_since_start
-        })
+        df = pd.DataFrame([r.dict(by_alias=True) for r in req.data])
 
         # --------------------------------------------------------
         # 2. Feature engineering
@@ -202,7 +198,7 @@ def predict(raw_input: RawTelemetryInput):
 
         probability = float(prediction[0][0])
 
-        return PredictionOutput(
+        return OilResponse(
             probability_of_failure=probability
         )
     except Exception as e:
