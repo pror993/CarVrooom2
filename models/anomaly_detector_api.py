@@ -60,6 +60,7 @@ class AnomalyRequest(BaseModel):
 class AnomalyResponse(BaseModel):
     anomaly_score: float
     is_anomaly: bool
+    window_index: int  # Which window (0-indexed) had the highest anomaly
 
 
 # ── Feature Engineering ──────────────────────────────────────────────────
@@ -145,16 +146,20 @@ def predict(req: AnomalyRequest):
     # Scale features
     X_scaled = scaler.transform(X_windowed)
 
-    # Get anomaly scores
+    # Get anomaly scores for all windows
     scores = model.decision_function(X_scaled)
-    latest_score = float(scores[-1])
+    
+    # Find window with highest anomaly (lowest score)
+    most_anomalous_idx = int(np.argmin(scores))
+    most_anomalous_score = float(scores[most_anomalous_idx])
 
     # Threshold at 1st percentile
     threshold = np.percentile(scores, 1)
 
     return AnomalyResponse(
-        anomaly_score=latest_score,
-        is_anomaly=bool(latest_score < threshold)
+        anomaly_score=most_anomalous_score,
+        is_anomaly=bool(most_anomalous_score < threshold),
+        window_index=most_anomalous_idx
     )
 
 
