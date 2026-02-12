@@ -1,6 +1,6 @@
 # CarVrooom
 
-AI-powered predictive maintenance platform for commercial vehicle fleets. Predicts component failures, diagnoses root causes, schedules service, and communicates with fleet owners — all orchestrated by an intelligent agentic layer.
+AI-powered predictive maintenance platform for commercial vehicle fleets. Predicts component failures, diagnoses root causes, schedules service, and communicates with fleet owners all orchestrated by an intelligent agentic layer.
 
 ---
 
