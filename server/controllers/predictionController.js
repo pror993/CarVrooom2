@@ -1,7 +1,7 @@
 const PredictionEvent = require('../models/PredictionEvent');
 
 // Valid prediction types
-const VALID_PREDICTION_TYPES = ['cascade_failure', 'single_failure', 'dpf_failure', 'scr_failure', 'oil_failure'];
+const VALID_PREDICTION_TYPES = ['cascade_failure', 'single_failure', 'dpf_failure', 'scr_failure', 'oil_failure', 'anomaly_detection'];
 
 // @desc    Ingest prediction data
 // @route   POST /api/predictions/ingest

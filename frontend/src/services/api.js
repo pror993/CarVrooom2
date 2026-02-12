@@ -103,4 +103,87 @@ export const userAPI = {
     },
 };
 
-export default { authAPI, userAPI };
+// Pipeline API — Fleet Dashboard
+export const pipelineAPI = {
+    // Scheduler control
+    getStatus: async () => {
+        try {
+            const response = await fetch(`${API_URL}/pipeline/status`);
+            return await handleResponse(response);
+        } catch (error) {
+            return { success: false, error: error.message };
+        }
+    },
+
+    start: async () => {
+        try {
+            const response = await fetch(`${API_URL}/pipeline/start`, { method: 'POST' });
+            return await handleResponse(response);
+        } catch (error) {
+            return { success: false, error: error.message };
+        }
+    },
+
+    stop: async () => {
+        try {
+            const response = await fetch(`${API_URL}/pipeline/stop`, { method: 'POST' });
+            return await handleResponse(response);
+        } catch (error) {
+            return { success: false, error: error.message };
+        }
+    },
+
+    reset: async (clearData = false) => {
+        try {
+            const response = await fetch(`${API_URL}/pipeline/reset`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ clearData }),
+            });
+            return await handleResponse(response);
+        } catch (error) {
+            return { success: false, error: error.message };
+        }
+    },
+
+    // Fleet data
+    getVehicles: async () => {
+        try {
+            const response = await fetch(`${API_URL}/pipeline/vehicles`);
+            return await handleResponse(response);
+        } catch (error) {
+            return { success: false, error: error.message };
+        }
+    },
+
+    getVehicle: async (vehicleId) => {
+        try {
+            const response = await fetch(`${API_URL}/pipeline/vehicles/${vehicleId}`);
+            return await handleResponse(response);
+        } catch (error) {
+            return { success: false, error: error.message };
+        }
+    },
+
+    getPredictions: async (vehicleId = null, limit = 50) => {
+        try {
+            let url = `${API_URL}/pipeline/predictions?limit=${limit}`;
+            if (vehicleId) url += `&vehicleId=${vehicleId}`;
+            const response = await fetch(url);
+            return await handleResponse(response);
+        } catch (error) {
+            return { success: false, error: error.message };
+        }
+    },
+
+    getCases: async (status = 'active') => {
+        try {
+            const response = await fetch(`${API_URL}/pipeline/cases?status=${status}`);
+            return await handleResponse(response);
+        } catch (error) {
+            return { success: false, error: error.message };
+        }
+    },
+};
+
+export default { authAPI, userAPI, pipelineAPI };

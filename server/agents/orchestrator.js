@@ -27,9 +27,15 @@ const UserProfile = require('../models/UserProfile');
  * Main orchestration function
  * Coordinates all agents in sequence
  * 
+ * If the prediction shows the vehicle is healthy (RUL above threshold),
+ * no case is registered — the vehicle is fine.
+ * 
  * @param {string} predictionId - MongoDB ObjectId of the prediction event
  * @returns {Object} Complete orchestration result with all agent outputs
  */
+
+const HEALTHY_RUL_THRESHOLD = 60; // days — above this, vehicle is considered healthy
+
 async function orchestrateAgents(predictionId) {
   console.log('═══════════════════════════════════════════════════════════');
   console.log('🤖 AGENT ORCHESTRATOR STARTED');
@@ -56,6 +62,45 @@ async function orchestrateAgents(predictionId) {
     console.log(`   Type: ${prediction.predictionType}`);
     console.log(`   Confidence: ${(prediction.confidence * 100).toFixed(1)}%`);
     console.log(`   ETA: ${prediction.etaDays} days\n`);
+
+    // ═══════════════════════════════════════════════════════════════
+    // HEALTH CHECK — Skip case creation if vehicle is healthy
+    // ═══════════════════════════════════════════════════════════════
+    if (prediction.etaDays >= HEALTHY_RUL_THRESHOLD) {
+      const executionTime = Date.now() - startTime;
+
+      console.log('═══════════════════════════════════════════════════════════');
+      console.log('✅ VEHICLE IS HEALTHY — No case registered');
+      console.log('═══════════════════════════════════════════════════════════\n');
+      console.log(`   RUL: ${prediction.etaDays} days (threshold: ${HEALTHY_RUL_THRESHOLD} days)`);
+      console.log(`   Confidence: ${(prediction.confidence * 100).toFixed(1)}%`);
+      console.log(`   All systems nominal — no maintenance action needed.\n`);
+
+      return {
+        success: true,
+        healthy: true,
+        caseId: null,
+        severity: 'none',
+        state: 'HEALTHY',
+        executionTimeMs: executionTime,
+        agentsExecuted: [],
+        message: `Vehicle is healthy. RUL ${prediction.etaDays} days exceeds threshold of ${HEALTHY_RUL_THRESHOLD} days. No case registered.`,
+        prediction: {
+          vehicleId: prediction.vehicleId,
+          predictionType: prediction.predictionType,
+          etaDays: prediction.etaDays,
+          confidence: prediction.confidence,
+        },
+        results: {
+          master: null,
+          diagnostic: null,
+          scheduling: null,
+          communication: null,
+        },
+      };
+    }
+
+    console.log(`   ⚠️  RUL ${prediction.etaDays} days < ${HEALTHY_RUL_THRESHOLD} day threshold — proceeding with case creation\n`);
 
     // ═══════════════════════════════════════════════════════════════
     // STEP 2: FETCH VEHICLE DATA

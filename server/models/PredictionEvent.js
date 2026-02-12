@@ -10,8 +10,8 @@ const predictionEventSchema = new mongoose.Schema({
     type: String,
     required: [true, 'Prediction type is required'],
     enum: {
-      values: ['cascade_failure', 'single_failure', 'dpf_failure', 'scr_failure', 'oil_failure'],
-      message: 'Prediction type must be one of: cascade_failure, single_failure, dpf_failure, scr_failure, oil_failure'
+      values: ['cascade_failure', 'single_failure', 'dpf_failure', 'scr_failure', 'oil_failure', 'anomaly_detection'],
+      message: 'Prediction type must be one of: cascade_failure, single_failure, dpf_failure, scr_failure, oil_failure, anomaly_detection'
     }
   },
   confidence: {
@@ -27,8 +27,8 @@ const predictionEventSchema = new mongoose.Schema({
   },
   // Raw model outputs for reference
   modelOutputs: {
-    rulPredLog: Number,  // Log-transformed RUL in hours (raw model output)
-    fail21Prob: Number   // Raw failure probability (0-1)
+    type: mongoose.Schema.Types.Mixed,
+    default: {}
   },
   signals: {
     type: mongoose.Schema.Types.Mixed,
@@ -38,7 +38,7 @@ const predictionEventSchema = new mongoose.Schema({
   // Source of the prediction (model vs manual)
   source: {
     type: String,
-    enum: ['dpf_model', 'scr_model', 'oil_model', 'manual', 'simulation'],
+    enum: ['dpf_model', 'scr_model', 'oil_model', 'anomaly_model', 'unified_ml', 'manual', 'simulation'],
     default: 'manual'
   },
   createdAt: {
