@@ -20,27 +20,41 @@ function GridBackground({ children }) {
     let cols, rows
     let activeSquares = [] // Squares currently pulsating
     let lastSpawnTime = 0
-    const spawnInterval = 600 // Spawn new pulsating square every 180 frames (very slow)
+    const spawnInterval = 200 // Spawn new pulsating squares more frequently (every 2 seconds)
 
     const initializeGrid = () => {
       cols = Math.ceil(canvas.width / gridSize)
       rows = Math.ceil(canvas.height / gridSize)
       activeSquares = []
 
-      // Start with multiple random squares
-      const initialSquares = Math.floor((cols * rows) * 0.02) // 2% of grid
+      // Start with more random squares for more activity
+      const initialSquares = Math.floor((cols * rows) * 0.08) // 8% of grid
       for (let i = 0; i < initialSquares; i++) {
         spawnNewSquare(Math.random()) // Start at random points in their lifecycle
       }
     }
 
     const spawnNewSquare = (initialLife = 0) => {
+      const colorType = Math.random()
+      let color
+      if (colorType < 0.7) {
+        // 70% white
+        color = { r: 255, g: 255, b: 255 }
+      } else if (colorType < 0.9) {
+        // 20% purple
+        color = { r: 168, g: 85, b: 247 } // purple-500
+      } else {
+        // 10% light purple
+        color = { r: 192, g: 132, b: 252 } // purple-400
+      }
+
       activeSquares.push({
         col: Math.floor(Math.random() * cols),
         row: Math.floor(Math.random() * rows),
         life: initialLife, // 0 to 1, represents the pulse lifecycle
-        maxOpacity: Math.random() * 0.15 + 0.08, // 0.08 to 0.23
-        speed: Math.random() * 0.002 + 0.003, // 0.003 to 0.005 per frame (very slow)
+        maxOpacity: Math.random() * 0.25 + 0.12, // 0.12 to 0.37 (increased for more visibility)
+        speed: Math.random() * 0.004 + 0.002, // 0.002 to 0.006 per frame (slower for gradual fade)
+        color: color
       })
     }
 
@@ -76,17 +90,19 @@ function GridBackground({ children }) {
           return false
         }
 
-        // Calculate opacity using a fade in-out curve
+        // Calculate opacity using a smooth fade in-out curve
         let opacity
         if (square.life < 0.5) {
-          // Fade in
-          opacity = (square.life / 0.5) * square.maxOpacity
+          // Fade in with ease-out
+          const t = square.life / 0.5
+          opacity = (1 - Math.cos(t * Math.PI)) / 2 * square.maxOpacity
         } else {
-          // Fade out
-          opacity = ((1 - square.life) / 0.5) * square.maxOpacity
+          // Fade out with ease-in
+          const t = (square.life - 0.5) / 0.5
+          opacity = (1 + Math.cos(t * Math.PI)) / 2 * square.maxOpacity
         }
 
-        ctx.fillStyle = `rgba(255, 255, 255, ${opacity})`
+        ctx.fillStyle = `rgba(${square.color.r}, ${square.color.g}, ${square.color.b}, ${opacity})`
         ctx.fillRect(square.col * gridSize, square.row * gridSize, gridSize, gridSize)
 
         return true
@@ -96,10 +112,10 @@ function GridBackground({ children }) {
     const animate = () => {
       time++
 
-      // Spawn new squares periodically (but keep multiple active)
+      // Spawn new squares more frequently with more variety
       if (time - lastSpawnTime > spawnInterval) {
-        // Spawn 1-3 new squares at once
-        const numToSpawn = Math.floor(Math.random() * 3) + 1
+        // Spawn 3-8 new squares at once for more fluid activity
+        const numToSpawn = Math.floor(Math.random() * 5) + 2
         for (let i = 0; i < numToSpawn; i++) {
           spawnNewSquare()
         }

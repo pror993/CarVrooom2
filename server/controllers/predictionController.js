@@ -1,11 +1,14 @@
 const PredictionEvent = require('../models/PredictionEvent');
 
+// Valid prediction types
+const VALID_PREDICTION_TYPES = ['cascade_failure', 'single_failure', 'dpf_failure', 'scr_failure', 'oil_failure'];
+
 // @desc    Ingest prediction data
 // @route   POST /api/predictions/ingest
 // @access  Private
 exports.ingestPrediction = async (req, res) => {
   try {
-    const { vehicleId, predictionType, confidence, etaDays, signals } = req.body;
+    const { vehicleId, predictionType, confidence, etaDays, signals, modelOutputs, source } = req.body;
 
     // Validate required fields
     if (!vehicleId || !predictionType || confidence === undefined || etaDays === undefined || !signals) {
@@ -16,10 +19,10 @@ exports.ingestPrediction = async (req, res) => {
     }
 
     // Validate predictionType enum
-    if (!['cascade_failure', 'single_failure'].includes(predictionType)) {
+    if (!VALID_PREDICTION_TYPES.includes(predictionType)) {
       return res.status(400).json({
         success: false,
-        error: 'predictionType must be either "cascade_failure" or "single_failure"'
+        error: `predictionType must be one of: ${VALID_PREDICTION_TYPES.join(', ')}`
       });
     }
 
@@ -45,7 +48,9 @@ exports.ingestPrediction = async (req, res) => {
       predictionType,
       confidence,
       etaDays,
-      signals
+      signals,
+      modelOutputs: modelOutputs || null,
+      source: source || 'manual'
     });
 
     res.status(201).json({
@@ -91,7 +96,7 @@ exports.getVehiclePredictions = async (req, res) => {
     const query = { vehicleId };
     
     // Filter by prediction type if provided
-    if (type && ['cascade_failure', 'single_failure'].includes(type)) {
+    if (type && VALID_PREDICTION_TYPES.includes(type)) {
       query.predictionType = type;
     }
 

@@ -10,8 +10,8 @@ const predictionEventSchema = new mongoose.Schema({
     type: String,
     required: [true, 'Prediction type is required'],
     enum: {
-      values: ['cascade_failure', 'single_failure'],
-      message: 'Prediction type must be either cascade_failure or single_failure'
+      values: ['cascade_failure', 'single_failure', 'dpf_failure', 'scr_failure', 'oil_failure'],
+      message: 'Prediction type must be one of: cascade_failure, single_failure, dpf_failure, scr_failure, oil_failure'
     }
   },
   confidence: {
@@ -25,10 +25,21 @@ const predictionEventSchema = new mongoose.Schema({
     required: [true, 'ETA days is required'],
     min: [0, 'ETA days must be a positive number']
   },
+  // Raw model outputs for reference
+  modelOutputs: {
+    rulPredLog: Number,  // Log-transformed RUL in hours (raw model output)
+    fail21Prob: Number   // Raw failure probability (0-1)
+  },
   signals: {
     type: mongoose.Schema.Types.Mixed,
     required: [true, 'Signals data is required'],
     default: {}
+  },
+  // Source of the prediction (model vs manual)
+  source: {
+    type: String,
+    enum: ['dpf_model', 'scr_model', 'oil_model', 'manual', 'simulation'],
+    default: 'manual'
   },
   createdAt: {
     type: Date,

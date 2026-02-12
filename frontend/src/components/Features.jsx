@@ -1,5 +1,23 @@
 import { Link } from 'react-router-dom'
 import { motion } from 'framer-motion'
+import { 
+  HiClock, 
+  HiCurrencyRupee, 
+  HiRefresh, 
+  HiShieldExclamation,
+  HiLightningBolt,
+  HiChartBar,
+  HiCog,
+  HiTrendingUp,
+  HiBeaker,
+  HiLightBulb,
+  HiCheckCircle,
+  HiDatabase,
+  HiChip,
+  HiExclamationCircle,
+  HiCalendar,
+  HiRefresh as HiLoop
+} from 'react-icons/hi'
 
 // Animation variants
 const fadeInUp = {
@@ -58,10 +76,10 @@ function Features() {
             className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4 md:gap-6 mb-12 sm:mb-16 max-w-5xl mx-auto"
           >
             {[
-              { label: 'High', sublabel: 'Downtime' },
-              { label: '₹1–5L', sublabel: 'Per Incident' },
-              { label: 'Reactive', sublabel: 'Servicing' },
-              { label: 'Warranty', sublabel: 'Leakage' }
+              { label: 'High', sublabel: 'Downtime', icon: HiClock },
+              { label: '₹1–5L', sublabel: 'Per Incident', icon: HiCurrencyRupee },
+              { label: 'Reactive', sublabel: 'Servicing', icon: HiRefresh },
+              { label: 'Warranty', sublabel: 'Leakage', icon: HiShieldExclamation }
             ].map((item, index) => (
               <motion.div
                 key={index}
@@ -69,6 +87,7 @@ function Features() {
                 whileHover={{ scale: 1.05, borderColor: 'rgba(239, 68, 68, 0.5)' }}
                 className="bg-gray-950 p-4 sm:p-6 rounded-lg border border-red-500/30 text-center"
               >
+                <item.icon className="text-3xl sm:text-4xl text-red-500 mx-auto mb-2" />
                 <div className="text-2xl sm:text-3xl font-bold text-red-500 mb-2">{item.label}</div>
                 <div className="text-xs sm:text-sm text-gray-400">{item.sublabel}</div>
               </motion.div>
@@ -134,17 +153,20 @@ function Features() {
             {[
               { 
                 letter: 'P', 
-                title: 'Predict', 
+                title: 'Predict',
+                icon: HiLightningBolt,
                 desc: 'Time-to-intervention forecasting for DPF, SCR & DEF systems.' 
               },
               { 
                 letter: 'E', 
-                title: 'Explain', 
+                title: 'Explain',
+                icon: HiLightBulb,
                 desc: 'Causal RCA engine for warranty and defect intelligence.' 
               },
               { 
                 letter: 'O', 
-                title: 'Orchestrate', 
+                title: 'Orchestrate',
+                icon: HiCog,
                 desc: 'Automated service scheduling with dealer optimization.' 
               }
             ].map((feature, index) => (
@@ -154,8 +176,8 @@ function Features() {
                 whileHover={{ scale: 1.05, borderColor: 'rgba(168, 85, 247, 0.5)' }}
                 className="bg-gray-950 p-6 sm:p-8 rounded-lg border border-gray-800 hover:border-purple-500/50 transition-all"
               >
-                <div className="w-10 h-10 sm:w-12 sm:h-12 bg-purple-500/10 rounded-lg flex items-center justify-center mb-4">
-                  <div className="text-xl sm:text-2xl text-purple-400 font-bold">{feature.letter}</div>
+                <div className="w-12 h-12 sm:w-14 sm:h-14 bg-purple-500/10 rounded-lg flex items-center justify-center mb-4">
+                  <feature.icon className="text-2xl sm:text-3xl text-purple-400" />
                 </div>
                 <h3 className="text-xl sm:text-2xl font-semibold mb-3 sm:mb-4 text-white">{feature.title}</h3>
                 <p className="text-sm sm:text-base text-gray-400">
@@ -191,12 +213,12 @@ function Features() {
             className="max-w-3xl mx-auto space-y-4 sm:space-y-6"
           >
             {[
-              { step: '01', title: 'Vehicle telematics ingestion' },
-              { step: '02', title: 'Degradation forecasting models' },
-              { step: '03', title: 'Anomaly detection' },
-              { step: '04', title: 'Causal RCA reasoning' },
-              { step: '05', title: 'Optimized service scheduling' },
-              { step: '06', title: 'Continuous learning & CAPA feedback' }
+              { step: '01', title: 'Vehicle telematics ingestion', icon: HiDatabase },
+              { step: '02', title: 'Degradation forecasting models', icon: HiTrendingUp },
+              { step: '03', title: 'Anomaly detection', icon: HiExclamationCircle },
+              { step: '04', title: 'Causal RCA reasoning', icon: HiLightBulb },
+              { step: '05', title: 'Optimized service scheduling', icon: HiCalendar },
+              { step: '06', title: 'Continuous learning & CAPA feedback', icon: HiLoop }
             ].map((item, index) => (
               <motion.div
                 key={index}
@@ -205,6 +227,7 @@ function Features() {
                 className="flex items-center bg-gray-950 p-4 sm:p-6 rounded-lg border border-gray-800 hover:border-purple-500/50 transition-all"
               >
                 <div className="text-2xl sm:text-3xl font-bold text-purple-400 mr-4 sm:mr-6 w-12 sm:w-16">{item.step}</div>
+                <item.icon className="text-2xl sm:text-3xl text-purple-400 mr-3 sm:mr-4" />
                 <div className="text-sm sm:text-base md:text-lg text-gray-300 font-medium">{item.title}</div>
               </motion.div>
             ))}
@@ -236,10 +259,10 @@ function Features() {
             className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6 mb-8 sm:mb-12"
           >
             {[
-              { title: 'Time-series forecasting', subtitle: 'for progressive degradation' },
-              { title: 'Anomaly detection', subtitle: 'for sudden subsystem faults' },
-              { title: 'Causal reasoning', subtitle: 'for explainable decisions' },
-              { title: 'Optimization engine', subtitle: 'for scheduling' }
+              { title: 'Time-series forecasting', subtitle: 'for progressive degradation', icon: HiChartBar },
+              { title: 'Anomaly detection', subtitle: 'for sudden subsystem faults', icon: HiExclamationCircle },
+              { title: 'Causal reasoning', subtitle: 'for explainable decisions', icon: HiBeaker },
+              { title: 'Optimization engine', subtitle: 'for scheduling', icon: HiChip }
             ].map((item, index) => (
               <motion.div
                 key={index}
@@ -247,6 +270,7 @@ function Features() {
                 whileHover={{ scale: 1.05 }}
                 className="bg-black/40 p-4 sm:p-6 rounded-lg border border-purple-900/30"
               >
+                <item.icon className="text-3xl sm:text-4xl text-purple-400 mb-3" />
                 <div className="text-sm text-purple-300 font-medium mb-2">{item.title}</div>
                 <div className="text-xs text-gray-400">{item.subtitle}</div>
               </motion.div>
