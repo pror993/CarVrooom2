@@ -30,7 +30,7 @@ uvicorn unified_api:app --host 0.0.0.0 --port 8000
 ```bash
 cd server
 npm install
-npm start
+npm run dev
 ```
 
 ---
