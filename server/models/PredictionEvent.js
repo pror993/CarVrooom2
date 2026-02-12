@@ -10,8 +10,8 @@ const predictionEventSchema = new mongoose.Schema({
     type: String,
     required: [true, 'Prediction type is required'],
     enum: {
-      values: ['cascade_failure', 'single_failure', 'dpf_failure', 'scr_failure', 'oil_failure', 'anomaly_detection'],
-      message: 'Prediction type must be one of: cascade_failure, single_failure, dpf_failure, scr_failure, oil_failure, anomaly_detection'
+      values: ['healthy', 'cascade_failure', 'single_failure', 'dpf_failure', 'scr_failure', 'oil_failure', 'anomaly_detection', 'anomaly'],
+      message: 'Prediction type must be one of: healthy, cascade_failure, single_failure, dpf_failure, scr_failure, oil_failure, anomaly_detection, anomaly'
     }
   },
   confidence: {

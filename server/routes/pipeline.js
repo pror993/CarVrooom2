@@ -29,21 +29,26 @@ router.get('/status', (req, res) => {
 
 // POST /api/pipeline/start
 router.post('/start', (req, res) => {
-  scheduler.start();
+  const { startDay } = req.body || {};
+  scheduler.start({ startDay: startDay || 0 });
   res.json({ success: true, message: 'Scheduler started', data: scheduler.getState() });
 });
 
 // POST /api/pipeline/stop
-router.post('/stop', (req, res) => {
-  scheduler.stop();
-  res.json({ success: true, message: 'Scheduler stopped', data: scheduler.getState() });
+router.post('/stop', async (req, res) => {
+  try {
+    await scheduler.stop();
+    res.json({ success: true, message: 'Scheduler stopped', data: scheduler.getState() });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
 });
 
 // POST /api/pipeline/reset
 router.post('/reset', async (req, res) => {
   try {
     const { clearData } = req.body;
-    scheduler.reset();
+    await scheduler.reset();
 
     if (clearData) {
       // Optionally clear prediction events and cases from pipeline runs
@@ -161,6 +166,8 @@ router.get('/vehicles/:vehicleId', async (req, res) => {
           currentState: c.currentState,
           predictionType: c.metadata?.predictionType,
           agentsExecuted: c.metadata?.agentsExecuted,
+          agentResults: c.agentResults || {},
+          metadata: c.metadata || {},
           createdAt: c.createdAt,
         })),
       },

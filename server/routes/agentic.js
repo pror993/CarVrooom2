@@ -180,7 +180,7 @@ router.get('/cases', async (req, res) => {
 router.post('/cases/:caseId/approve-appointment', async (req, res) => {
   try {
     const { caseId } = req.params;
-    const { selectedDate, selectedServiceCenter, serviceCenterId } = req.body;
+    const { selectedDate, selectedServiceCenter, serviceCenterId, selectedTimeSlot, selectedOption } = req.body;
 
     if (!selectedDate || !selectedServiceCenter) {
       return res.status(400).json({
@@ -205,10 +205,12 @@ router.post('/cases/:caseId/approve-appointment', async (req, res) => {
         'agentResults.schedulingAgent.status': 'confirmed',
         'agentResults.schedulingAgent.confirmedAppointment': {
           date: new Date(selectedDate),
+          timeSlot: selectedTimeSlot || null,
           serviceCenter: selectedServiceCenter,
           serviceCenterId: serviceCenterId,
           confirmedAt: new Date(),
-          confirmedBy: 'user'
+          confirmedBy: 'user',
+          selectedOption: selectedOption || null
         },
         'metadata.awaitingUserApproval': false,
         'metadata.appointmentConfirmed': true,

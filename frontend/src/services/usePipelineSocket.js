@@ -76,9 +76,9 @@ export function usePipelineSocket() {
     wsRef.current = ws;
   }, []);
 
-  const sendAction = useCallback((action) => {
+  const sendAction = useCallback((action, extra = {}) => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({ action }));
+      wsRef.current.send(JSON.stringify({ action, ...extra }));
     }
   }, []);
 

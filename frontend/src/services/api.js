@@ -115,9 +115,13 @@ export const pipelineAPI = {
         }
     },
 
-    start: async () => {
+    start: async (startDay = 0) => {
         try {
-            const response = await fetch(`${API_URL}/pipeline/start`, { method: 'POST' });
+            const response = await fetch(`${API_URL}/pipeline/start`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ startDay }),
+            });
             return await handleResponse(response);
         } catch (error) {
             return { success: false, error: error.message };
@@ -186,4 +190,99 @@ export const pipelineAPI = {
     },
 };
 
-export default { authAPI, userAPI, pipelineAPI };
+// Chat API — Vehicle Chatbot (Ollama)
+export const chatAPI = {
+    sendMessage: async (vehicleId, message, history = []) => {
+        try {
+            const response = await fetch(`${API_URL}/chat/${vehicleId}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ message, history }),
+            });
+            return await handleResponse(response);
+        } catch (error) {
+            return { success: false, error: error.message };
+        }
+    },
+
+    getWelcome: async (vehicleId) => {
+        try {
+            const response = await fetch(`${API_URL}/chat/${vehicleId}/welcome`);
+            return await handleResponse(response);
+        } catch (error) {
+            return { success: false, error: error.message };
+        }
+    },
+};
+
+// Scheduling API — Appointment booking
+export const schedulingAPI = {
+    approveAppointment: async (caseId, { selectedDate, selectedTimeSlot, selectedServiceCenter, serviceCenterId, selectedOption }) => {
+        try {
+            const response = await fetch(`${API_URL}/agentic/cases/${caseId}/approve-appointment`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ selectedDate, selectedTimeSlot, selectedServiceCenter, serviceCenterId, selectedOption }),
+            });
+            return await handleResponse(response);
+        } catch (error) {
+            return { success: false, error: error.message };
+        }
+    },
+};
+
+// Voice API — Sarvam AI STT/TTS
+export const voiceAPI = {
+    speechToText: async (audioBlob) => {
+        try {
+            const formData = new FormData();
+            formData.append('file', audioBlob, 'recording.webm');
+            const response = await fetch(`${API_URL}/voice/stt`, {
+                method: 'POST',
+                body: formData,
+            });
+            return await handleResponse(response);
+        } catch (error) {
+            return { success: false, error: error.message };
+        }
+    },
+
+    textToSpeech: async (text) => {
+        try {
+            const response = await fetch(`${API_URL}/voice/tts`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ text }),
+            });
+            return await handleResponse(response);
+        } catch (error) {
+            return { success: false, error: error.message };
+        }
+    },
+};
+
+// Service Center API
+export const serviceCenterAPI = {
+    getDashboard: async (centerId) => {
+        try {
+            const response = await fetch(`${API_URL}/service-center/${centerId}/dashboard`);
+            return await handleResponse(response);
+        } catch (error) {
+            return { success: false, error: error.message };
+        }
+    },
+    updateAppointmentStatus: async (centerId, caseId, status) => {
+        try {
+            const response = await fetch(`${API_URL}/service-center/${centerId}/appointment/${caseId}/status`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ status }),
+            });
+            return await handleResponse(response);
+        } catch (error) {
+            return { success: false, error: error.message };
+        }
+    },
+};
+
+export default { authAPI, userAPI, pipelineAPI, chatAPI, schedulingAPI, voiceAPI, serviceCenterAPI };

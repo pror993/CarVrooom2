@@ -36,6 +36,9 @@ app.use('/api/agentic', require('./routes/agentic'));     // Agentic AI orchestr
 app.use('/api/ueba', require('./routes/ueba'));           // UEBA monitoring
 app.use('/api/llm', require('./routes/llmTest'));         // Temporary test route
 app.use('/api/pipeline', require('./routes/pipeline'));   // Pipeline scheduler + fleet dashboard
+app.use('/api/chat', require('./routes/chat'));           // Vehicle chatbot (Ollama)
+app.use('/api/voice', require('./routes/voice'));         // Sarvam AI STT/TTS proxy
+app.use('/api/service-center', require('./routes/serviceCenter')); // Service center dashboard
 
 // Error handling middleware
 app.use((err, req, res, next) => {

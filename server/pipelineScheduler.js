@@ -37,6 +37,7 @@ const VehicleTelemetry = require('./models/VehicleTelemetry');
 const PredictionEvent = require('./models/PredictionEvent');
 const Case = require('./models/Case');
 const { orchestrateAgents } = require('./agents/orchestrator');
+const { queueBatchPredictions, waitForJobs, getQueueStats, setBroadcastFunction, cancelAll, resumeQueue } = require('./queues/predictionQueue');
 
 // ── Configuration ────────────────────────────────────────────────
 const ML_API_URL = process.env.ML_API_URL || 'http://localhost:8000';
@@ -103,21 +104,27 @@ async function callMLAPI(vehicleId, telemetryDocs) {
   return response.json();
 }
 
-// ── Process one vehicle ──────────────────────────────────────────
-async function processVehicle(vehicleId) {
+// ── Process one vehicle (DEPRECATED - now using BullMQ queue) ────
+// This function is kept for reference but no longer used in the tick loop.
+// Vehicle predictions are now queued via queueBatchPredictions() and processed
+// in parallel by the BullMQ worker in queues/predictionQueue.js
+/*
+async function processVehicle(vehicleId, tickRowIndex) {
   const state = vehicleState[vehicleId];
+  // Use the snapshotted row index for this tick (not the global which may have advanced)
+  const rowIndex = tickRowIndex || currentRowIndex;
 
   // Check if we have enough data and it's time for a prediction
-  const rowsSinceLastPrediction = currentRowIndex - state.lastPredictionRow;
-  if (currentRowIndex < MIN_ROWS_FOR_PREDICTION) {
-    return { vehicleId, action: 'waiting', reason: `Need ${MIN_ROWS_FOR_PREDICTION} rows, have ${currentRowIndex}` };
+  const rowsSinceLastPrediction = rowIndex - state.lastPredictionRow;
+  if (rowIndex < MIN_ROWS_FOR_PREDICTION) {
+    return { vehicleId, action: 'waiting', reason: `Need ${MIN_ROWS_FOR_PREDICTION} rows, have ${rowIndex}` };
   }
   if (rowsSinceLastPrediction < PREDICTION_INTERVAL && state.lastPrediction) {
     return { vehicleId, action: 'skip', reason: 'Not yet time for next prediction' };
   }
 
   // Fetch rolling window from MongoDB
-  const telemetryDocs = await VehicleTelemetry.getRowsUpTo(vehicleId, currentRowIndex);
+  const telemetryDocs = await VehicleTelemetry.getRowsUpTo(vehicleId, rowIndex);
   if (telemetryDocs.length < MIN_ROWS_FOR_PREDICTION) {
     return { vehicleId, action: 'insufficient_data', rows: telemetryDocs.length };
   }
@@ -137,7 +144,7 @@ async function processVehicle(vehicleId) {
     source: mlResult.source,
   });
 
-  state.lastPredictionRow = currentRowIndex;
+  state.lastPredictionRow = rowIndex;
   state.lastPrediction = {
     predictionId: prediction._id.toString(),
     predictionType: mlResult.predictionType,
@@ -152,8 +159,8 @@ async function processVehicle(vehicleId) {
     predictionType: mlResult.predictionType,
     etaDays: mlResult.etaDays,
     confidence: mlResult.confidence,
-    rowIndex: currentRowIndex,
-    simDay: Math.floor(currentRowIndex / 288),
+    rowIndex: rowIndex,
+    simDay: Math.floor(rowIndex / 288),
   });
 
   // Check if vehicle needs attention
@@ -203,74 +210,134 @@ async function processVehicle(vehicleId) {
     };
   }
 }
+*/
 
 // ── Tick: advance virtual clock and process all vehicles ─────────
+let tickInProgress = false;
+
 async function tick() {
-  tickCount++;
-  currentRowIndex = Math.min(currentRowIndex + TICK_ROWS, MAX_ROWS);
-  const simDay = Math.floor(currentRowIndex / 288);
-
-  console.log(`\n${'═'.repeat(70)}`);
-  console.log(`⏰ TICK #${tickCount} | Row ${currentRowIndex}/${MAX_ROWS} | Simulated Day ${simDay}/60`);
-  console.log(`${'═'.repeat(70)}`);
-
-  broadcastEvent('tick', {
-    tickCount,
-    currentRowIndex,
-    maxRows: MAX_ROWS,
-    simDay,
-    simDayTotal: 60,
-  });
-
-  // Process each vehicle
-  const results = [];
-  for (const vehicleId of FLEET_VEHICLE_IDS) {
-    try {
-      const result = await processVehicle(vehicleId);
-      results.push(result);
-
-      if (result.action === 'alert') {
-        console.log(`   🚨 ${vehicleId}: ALERT — ${result.predictionType}, RUL=${result.etaDays}d, Case=${result.caseId}`);
-      } else if (result.action === 'healthy') {
-        console.log(`   🟢 ${vehicleId}: HEALTHY — RUL=${result.etaDays}d`);
-      } else if (result.action === 'skip') {
-        console.log(`   ⏭️  ${vehicleId}: ${result.reason}`);
-      } else {
-        console.log(`   ⏳ ${vehicleId}: ${result.action} — ${result.reason || ''}`);
-      }
-    } catch (error) {
-      console.error(`   ❌ ${vehicleId}: Error — ${error.message}`);
-      results.push({ vehicleId, action: 'error', error: error.message });
-    }
+  // CRITICAL: prevent overlapping ticks. If the previous tick is still running
+  // (e.g. orchestration takes 15s+), skip this tick instead of corrupting state.
+  if (tickInProgress) {
+    console.log(`   ⏸️  Tick skipped — previous tick still in progress`);
+    return;
   }
+  tickInProgress = true;
 
-  // Broadcast summary
-  broadcastEvent('tick_summary', {
-    tickCount,
-    simDay,
-    results: results.map(r => ({
-      vehicleId: r.vehicleId,
-      action: r.action,
-      etaDays: r.etaDays,
-      severity: r.severity,
-    })),
-  });
+  try {
+    tickCount++;
+    currentRowIndex = Math.min(currentRowIndex + TICK_ROWS, MAX_ROWS);
+    // Snapshot the row index for this tick so all vehicles in this tick
+    // use the same consistent value, even if the next tick fires.
+    const tickRowIndex = currentRowIndex;
+    const simDay = Math.floor(tickRowIndex / 288);
 
-  // Stop if we've reached the end of data
-  if (currentRowIndex >= MAX_ROWS) {
-    console.log(`\n🏁 Reached end of telemetry data (${MAX_ROWS} rows = 60 days)`);
-    stop();
+    console.log(`\n${'═'.repeat(70)}`);
+    console.log(`⏰ TICK #${tickCount} | Row ${tickRowIndex}/${MAX_ROWS} | Simulated Day ${simDay}/60`);
+    console.log(`${'═'.repeat(70)}`);
+
+    broadcastEvent('tick', {
+      tickCount,
+      currentRowIndex: tickRowIndex,
+      maxRows: MAX_ROWS,
+      simDay,
+      simDayTotal: 60,
+    });
+
+    // ── Queue-based parallel processing ──────────────────────────
+    // Instead of looping through vehicles sequentially, queue all vehicles for parallel processing
+    const vehiclesToProcess = [];
+    
+    for (const vehicleId of FLEET_VEHICLE_IDS) {
+      const state = vehicleState[vehicleId];
+      const rowsSinceLastPrediction = tickRowIndex - state.lastPredictionRow;
+      
+      // Check if this vehicle needs prediction
+      if (tickRowIndex >= MIN_ROWS_FOR_PREDICTION && 
+          (rowsSinceLastPrediction >= PREDICTION_INTERVAL || !state.lastPrediction)) {
+        vehiclesToProcess.push(vehicleId);
+        state.lastPredictionRow = tickRowIndex; // Mark as queued
+      } else if (tickRowIndex < MIN_ROWS_FOR_PREDICTION) {
+        console.log(`   ⏳ ${vehicleId}: waiting — Need ${MIN_ROWS_FOR_PREDICTION} rows, have ${tickRowIndex}`);
+      } else {
+        console.log(`   ⏭️  ${vehicleId}: Not yet time for next prediction`);
+      }
+    }
+
+    if (vehiclesToProcess.length > 0) {
+      console.log(`   🚀 Queueing ${vehiclesToProcess.length} vehicles for parallel processing...`);
+      
+      // Queue all vehicles at once - BullMQ will process them in parallel
+      const jobs = await queueBatchPredictions(vehiclesToProcess, tickRowIndex, simDay);
+      
+      // Get queue stats
+      const queueStats = await getQueueStats();
+      console.log(`   📊 Queue stats: ${queueStats.active} active, ${queueStats.waiting} waiting, ${queueStats.completed} completed`);
+      
+      // CRITICAL: Wait for all jobs to complete before advancing to next tick
+      console.log(`   ⏳ Waiting for ${jobs.length} jobs to complete...`);
+      const results = await waitForJobs(jobs);
+
+      // If stopped/reset during wait, bail out
+      if (!isRunning) {
+        console.log('   ⏹️  Pipeline stopped during tick — aborting');
+        return;
+      }
+
+      console.log(`   ✅ All ${results.length} jobs completed`);
+    }
+
+    // If stopped/reset, don't broadcast or advance
+    if (!isRunning) return;
+
+    // Broadcast summary
+    broadcastEvent('tick_summary', {
+      tickCount,
+      simDay,
+      vehiclesQueued: vehiclesToProcess.length,
+    });
+
+    // Stop if we've reached the end of data
+    if (tickRowIndex >= MAX_ROWS) {
+      console.log(`\n🏁 Reached end of telemetry data (${MAX_ROWS} rows = 60 days)`);
+      await stop();
+    }
+  } finally {
+    tickInProgress = false;
   }
 }
 
 // ── Start/Stop ───────────────────────────────────────────────────
 let intervalHandle = null;
 
-function start() {
+function scheduleNextTick() {
+  if (!isRunning) return;
+  intervalHandle = setTimeout(async () => {
+    await tick();
+    scheduleNextTick(); // Schedule next tick only AFTER current one finishes
+  }, TICK_INTERVAL_MS);
+}
+
+function start(options = {}) {
   if (isRunning) {
     console.log('⚠️  Scheduler already running');
     return;
   }
+
+  // Connect queue worker to WebSocket broadcast
+  setBroadcastFunction(broadcastEvent);
+
+  // Clear cancellation flag so queue worker processes new jobs
+  resumeQueue();
+
+  // Allow starting from a specific day (e.g. day 43 to skip the boring healthy period)
+  if (options.startDay && options.startDay > 0) {
+    const startRow = options.startDay * 288;
+    currentRowIndex = Math.min(startRow, MAX_ROWS);
+    tickCount = options.startDay;
+    console.log(`⏩ Fast-forwarded to Day ${options.startDay} (row ${currentRowIndex})`);
+  }
+
   isRunning = true;
   console.log('╔══════════════════════════════════════════════════════════════╗');
   console.log('║   🚀 VIRTUAL CLOCK SCHEDULER STARTED                       ║');
@@ -279,24 +346,26 @@ function start() {
   console.log(`║   Rows per tick:  ${TICK_ROWS} (= ${Math.round(TICK_ROWS/288)} sim day(s))                    ║`);
   console.log(`║   Predict every:  ${PREDICTION_INTERVAL} rows                            ║`);
   console.log(`║   Total data:     ${MAX_ROWS} rows (60 days)                    ║`);
+  console.log(`║   Starting from:  Day ${Math.floor(currentRowIndex/288)} (row ${currentRowIndex})          ║`);
   console.log(`║   Vehicles:       ${FLEET_VEHICLE_IDS.length}                                        ║`);
   console.log(`║   ML API:         ${ML_API_URL}                   ║`);
   console.log('╚══════════════════════════════════════════════════════════════╝\n');
 
-  // Run first tick immediately
+  // Run first tick immediately, then chain subsequent ticks
   tick().then(() => {
-    if (isRunning) {
-      intervalHandle = setInterval(() => tick(), TICK_INTERVAL_MS);
-    }
+    scheduleNextTick();
   });
 }
 
-function stop() {
+async function stop() {
   if (intervalHandle) {
-    clearInterval(intervalHandle);
+    clearTimeout(intervalHandle);
     intervalHandle = null;
   }
   isRunning = false;
+  tickInProgress = false;
+  // Cancel and drain all queued BullMQ jobs so nothing keeps running
+  await cancelAll();
   console.log('\n🛑 Virtual Clock Scheduler stopped');
 }
 
@@ -311,10 +380,11 @@ function getState() {
   };
 }
 
-function reset() {
-  stop();
+async function reset() {
+  await stop();
   currentRowIndex = 0;
   tickCount = 0;
+  tickInProgress = false;
   FLEET_VEHICLE_IDS.forEach(id => {
     vehicleState[id] = {
       lastPredictionRow: 0,
@@ -347,9 +417,9 @@ function attachToServer(server) {
     ws.on('message', (message) => {
       try {
         const msg = JSON.parse(message);
-        if (msg.action === 'start') start();
-        if (msg.action === 'stop') stop();
-        if (msg.action === 'reset') reset();
+        if (msg.action === 'start') start({ startDay: msg.startDay || 0 });
+        if (msg.action === 'stop') stop();    // async — fire and forget is OK here
+        if (msg.action === 'reset') reset();  // async — fire and forget is OK here
         if (msg.action === 'state') {
           ws.send(JSON.stringify({
             event: 'state',

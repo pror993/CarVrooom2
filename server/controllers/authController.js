@@ -105,6 +105,15 @@ exports.login = async (req, res) => {
         // Generate token
         const token = user.generateAuthToken();
 
+        // Build profile payload
+        const profilePayload = profile ? {
+            name: profile.name,
+            phone: profile.phone,
+            ...(user.role === 'service_center' && profile.serviceCenterId
+              ? { serviceCenterId: profile.serviceCenterId }
+              : {}),
+        } : null;
+
         res.json({
             success: true,
             token,
@@ -113,10 +122,7 @@ exports.login = async (req, res) => {
                 email: user.email,
                 role: user.role,
                 isVerified: user.isVerified,
-                profile: profile ? {
-                    name: profile.name,
-                    phone: profile.phone
-                } : null
+                profile: profilePayload
             }
         });
     } catch (error) {

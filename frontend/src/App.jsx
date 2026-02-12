@@ -7,6 +7,7 @@ import Login from './pages/Login'
 import Signup from './pages/Signup'
 import VehicleOwnerDashboard from './pages/VehicleOwnerDashboard'
 import FleetOwnerDashboard from './pages/FleetOwnerDashboard'
+import VehicleDetailPage from './pages/VehicleDetailPage'
 import ServiceCenterDashboard from './pages/ServiceCenterDashboard'
 import TechnicianDashboard from './pages/TechnicianDashboard'
 
@@ -51,6 +52,12 @@ function App() {
             <Route path="/dashboard/fleet-owner" element={
               <ProtectedRoute allowedRoles={['fleet_owner']}>
                 <FleetOwnerDashboard />
+              </ProtectedRoute>
+            } />
+
+            <Route path="/vehicle/:vehicleId" element={
+              <ProtectedRoute allowedRoles={['fleet_owner', 'vehicle_owner']}>
+                <VehicleDetailPage />
               </ProtectedRoute>
             } />
 
