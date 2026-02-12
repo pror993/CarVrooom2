@@ -63,7 +63,7 @@ router.post('/run', async (req, res) => {
 
   } catch (error) {
     console.error('❌ Orchestration API Error:', error.message);
-
+    
     res.status(500).json({
       success: false,
       error: error.message,
@@ -86,9 +86,9 @@ router.post('/run', async (req, res) => {
 router.get('/cases/:caseId', async (req, res) => {
   try {
     const { caseId } = req.params;
-
+    
     const caseRecord = await Case.findOne({ caseId });
-
+    
     if (!caseRecord) {
       return res.status(404).json({
         success: false,
@@ -103,7 +103,7 @@ router.get('/cases/:caseId', async (req, res) => {
 
   } catch (error) {
     console.error('❌ Get Case Error:', error.message);
-
+    
     res.status(500).json({
       success: false,
       error: error.message
@@ -132,7 +132,7 @@ router.get('/cases/:caseId', async (req, res) => {
 router.get('/cases', async (req, res) => {
   try {
     const { state, severity, vehicleId, limit = 50 } = req.query;
-
+    
     const query = {};
     if (state) query.state = state;
     if (severity) query.severity = severity;
@@ -150,7 +150,7 @@ router.get('/cases', async (req, res) => {
 
   } catch (error) {
     console.error('❌ Get Cases Error:', error.message);
-
+    
     res.status(500).json({
       success: false,
       error: error.message
@@ -190,7 +190,7 @@ router.post('/cases/:caseId/approve-appointment', async (req, res) => {
     }
 
     const caseRecord = await Case.findOne({ caseId });
-
+    
     if (!caseRecord) {
       return res.status(404).json({
         success: false,
@@ -231,7 +231,7 @@ router.post('/cases/:caseId/approve-appointment', async (req, res) => {
 
   } catch (error) {
     console.error('❌ Approve Appointment Error:', error.message);
-
+    
     res.status(500).json({
       success: false,
       error: error.message

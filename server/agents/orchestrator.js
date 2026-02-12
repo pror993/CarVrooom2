@@ -40,7 +40,7 @@ async function orchestrateAgents(predictionId) {
   console.log('═══════════════════════════════════════════════════════════');
   console.log('🤖 AGENT ORCHESTRATOR STARTED');
   console.log('═══════════════════════════════════════════════════════════\n');
-
+  
   const startTime = Date.now();
   let caseRecord = null;
 
@@ -50,7 +50,7 @@ async function orchestrateAgents(predictionId) {
     // ═══════════════════════════════════════════════════════════════
     console.log('📥 STEP 1: Ingesting Prediction Event');
     console.log('─────────────────────────────────────────────────────────\n');
-
+    
     const prediction = await PredictionEvent.findById(predictionId);
     if (!prediction) {
       throw new Error(`Prediction not found: ${predictionId}`);
@@ -107,7 +107,7 @@ async function orchestrateAgents(predictionId) {
     // ═══════════════════════════════════════════════════════════════
     console.log('🚗 STEP 2: Fetching Vehicle Data');
     console.log('─────────────────────────────────────────────────────────\n');
-
+    
     const vehicle = await Vehicle.findOne({ vehicleId: prediction.vehicleId });
     if (!vehicle) {
       throw new Error(`Vehicle not found: ${prediction.vehicleId}`);
@@ -125,7 +125,7 @@ async function orchestrateAgents(predictionId) {
     // ═══════════════════════════════════════════════════════════════
     console.log('📋 STEP 3: Creating Case');
     console.log('─────────────────────────────────────────────────────────\n');
-
+    
     const caseId = `CASE-${Date.now()}`;
     caseRecord = await Case.create({
       caseId: caseId,
@@ -153,7 +153,7 @@ async function orchestrateAgents(predictionId) {
     console.log('═══════════════════════════════════════════════════════════');
     console.log('🎯 STEP 4: Running Master Agent (Orchestration Decision)');
     console.log('═══════════════════════════════════════════════════════════\n');
-
+    
     // UEBA: Track MasterAgent execution
     const masterEventId = await uebaMonitor.logAgentStart('MasterAgent', {
       caseId: caseRecord.caseId,
@@ -161,11 +161,11 @@ async function orchestrateAgents(predictionId) {
       predictionId: prediction._id.toString()
     });
     const masterStartTime = Date.now();
-
+    
     let masterResult;
     try {
       masterResult = await masterAgent(prediction, vehicle);
-
+      
       // UEBA: Log successful completion
       await uebaMonitor.logAgentComplete(
         masterEventId,
@@ -193,7 +193,7 @@ async function orchestrateAgents(predictionId) {
       );
       throw error;
     }
-
+    
     console.log('✅ Master Agent Decision:');
     console.log(`   Severity: ${masterResult.severity.toUpperCase()}`);
     console.log(`   Contact Customer: ${masterResult.customerContact ? 'YES' : 'NO'}`);
@@ -217,7 +217,7 @@ async function orchestrateAgents(predictionId) {
     console.log('═══════════════════════════════════════════════════════════');
     console.log('🔄 STEP 5: Running Worker Agents');
     console.log('═══════════════════════════════════════════════════════════\n');
-
+    
     const workerResults = {
       diagnosticAgent: null,
       communicationAgent: null,
@@ -227,7 +227,7 @@ async function orchestrateAgents(predictionId) {
     // Run Diagnostic Agent (usually first)
     if (masterResult.agentsToInvoke.includes('DiagnosticAgent')) {
       console.log('🔍 Running Diagnostic Agent...\n');
-
+      
       // UEBA: Track DiagnosticAgent execution
       const diagEventId = await uebaMonitor.logAgentStart('DiagnosticAgent', {
         caseId: caseRecord.caseId,
@@ -235,11 +235,11 @@ async function orchestrateAgents(predictionId) {
         predictionId: prediction._id.toString()
       });
       const diagStartTime = Date.now();
-
+      
       let diagnosticResult;
       try {
         diagnosticResult = await diagnosticAgent(prediction, vehicle);
-
+        
         // UEBA: Log successful completion
         await uebaMonitor.logAgentComplete(
           diagEventId,
@@ -267,14 +267,14 @@ async function orchestrateAgents(predictionId) {
         );
         throw error;
       }
-
+      
       workerResults.diagnosticAgent = diagnosticResult;
-
+      
       await Case.findOneAndUpdate(
         { caseId: caseRecord.caseId },
         { 'agentResults.diagnosticAgent': diagnosticResult }
       );
-
+      
       console.log('✅ Diagnostic Agent complete:');
       console.log(`   Risk: ${diagnosticResult.risk}`);
       console.log(`   Urgency: ${diagnosticResult.urgency}`);
@@ -284,7 +284,7 @@ async function orchestrateAgents(predictionId) {
     // Run Scheduling Agent (uses diagnostic results)
     if (masterResult.agentsToInvoke.includes('SchedulerAgent')) {
       console.log('📅 Running Scheduling Agent...\n');
-
+      
       // UEBA: Track SchedulingAgent execution
       const schedEventId = await uebaMonitor.logAgentStart('SchedulingAgent', {
         caseId: caseRecord.caseId,
@@ -292,7 +292,7 @@ async function orchestrateAgents(predictionId) {
         predictionId: prediction._id.toString()
       });
       const schedStartTime = Date.now();
-
+      
       let schedulingResult;
       try {
         // Look up owner's UserProfile for geo-location scoring
@@ -312,7 +312,7 @@ async function orchestrateAgents(predictionId) {
           userId: ownerProfile?.userId || null,
           userProfile: ownerProfile
         });
-
+        
         // UEBA: Log successful completion
         await uebaMonitor.logAgentComplete(
           schedEventId,
@@ -322,7 +322,7 @@ async function orchestrateAgents(predictionId) {
             caseId: caseRecord.caseId,
             vehicleId: vehicle.vehicleId,
             predictionId: prediction._id.toString(),
-            metadata: {
+            metadata: { 
               status: schedulingResult.status,
               suggestionsCount: schedulingResult.suggestions?.length || 0
             }
@@ -343,12 +343,12 @@ async function orchestrateAgents(predictionId) {
         );
         throw error;
       }
-
+      
       workerResults.schedulingAgent = schedulingResult;
-
+      
       // Note: schedulingAgent v2 saves to Case internally, but we update
       // the scheduling result reference in workerResults for the orchestrator
-
+      
       console.log('✅ Scheduling Agent complete:');
       console.log(`   Urgency: ${schedulingResult.schedulingUrgency}`);
       console.log(`   Algorithm: ${schedulingResult.algorithm}`);
@@ -362,7 +362,7 @@ async function orchestrateAgents(predictionId) {
     // Run Communication Agent (usually last, uses all prior results)
     if (masterResult.agentsToInvoke.includes('CommunicationAgent')) {
       console.log('📧 Running Communication Agent...\n');
-
+      
       // UEBA: Track CommunicationAgent execution
       const commEventId = await uebaMonitor.logAgentStart('CommunicationAgent', {
         caseId: caseRecord.caseId,
@@ -370,7 +370,7 @@ async function orchestrateAgents(predictionId) {
         predictionId: prediction._id.toString()
       });
       const commStartTime = Date.now();
-
+      
       if (!workerResults.diagnosticAgent) {
         console.log('⚠️  Communication Agent requires Diagnostic Agent output');
         console.log('   Running Diagnostic Agent first...\n');
@@ -380,7 +380,7 @@ async function orchestrateAgents(predictionId) {
           { 'agentResults.diagnosticAgent': workerResults.diagnosticAgent }
         );
       }
-
+      
       let communicationResult;
       try {
         communicationResult = await communicationAgent(
@@ -388,7 +388,7 @@ async function orchestrateAgents(predictionId) {
           workerResults.diagnosticAgent,
           vehicle
         );
-
+        
         // UEBA: Log successful completion
         await uebaMonitor.logAgentComplete(
           commEventId,
@@ -398,7 +398,7 @@ async function orchestrateAgents(predictionId) {
             caseId: caseRecord.caseId,
             vehicleId: vehicle.vehicleId,
             predictionId: prediction._id.toString(),
-            metadata: {
+            metadata: { 
               channel: communicationResult.channel,
               tone: communicationResult.tone
             }
@@ -419,14 +419,14 @@ async function orchestrateAgents(predictionId) {
         );
         throw error;
       }
-
+      
       workerResults.communicationAgent = communicationResult;
-
+      
       await Case.findOneAndUpdate(
         { caseId: caseRecord.caseId },
         { 'agentResults.communicationAgent': communicationResult }
       );
-
+      
       console.log('✅ Communication Agent complete:');
       console.log(`   Channel: ${communicationResult.channel}`);
       console.log(`   Tone: ${communicationResult.tone}`);
@@ -439,9 +439,9 @@ async function orchestrateAgents(predictionId) {
     console.log('═══════════════════════════════════════════════════════════');
     console.log('💾 STEP 6: Storing Final Results');
     console.log('═══════════════════════════════════════════════════════════\n');
-
+    
     const executionTime = Date.now() - startTime;
-
+    
     await Case.findOneAndUpdate(
       { caseId: caseRecord.caseId },
       {
@@ -461,10 +461,10 @@ async function orchestrateAgents(predictionId) {
     console.log('═══════════════════════════════════════════════════════════');
     console.log('🔄 STEP 7: Updating Case State');
     console.log('═══════════════════════════════════════════════════════════\n');
-
+    
     // Determine final state based on workflow
     let finalState = 'PROCESSED';
-
+    
     if (workerResults.schedulingAgent && workerResults.schedulingAgent.userApprovalRequired) {
       finalState = 'AWAITING_USER_APPROVAL';
     } else if (masterResult.customerContact) {
@@ -485,10 +485,10 @@ async function orchestrateAgents(predictionId) {
     console.log('═══════════════════════════════════════════════════════════');
     console.log('✅ ORCHESTRATION COMPLETE');
     console.log('═══════════════════════════════════════════════════════════\n');
-
+    
     // Get final Case state from database
     const finalCase = await Case.findOne({ caseId: caseRecord.caseId });
-
+    
     console.log('📊 Summary:');
     console.log(`   Case ID: ${finalCase.caseId}`);
     console.log(`   Severity: ${finalCase.severity}`);
@@ -548,20 +548,20 @@ async function orchestrateAgents(predictionId) {
  */
 async function orchestrateByVehicle(vehicleId, predictionType = null) {
   console.log(`🔍 Finding prediction for vehicle: ${vehicleId}`);
-
+  
   const query = { vehicleId: vehicleId };
   if (predictionType) {
     query.predictionType = predictionType;
   }
-
+  
   const prediction = await PredictionEvent.findOne(query).sort({ createdAt: -1 });
-
+  
   if (!prediction) {
     throw new Error(`No prediction found for vehicle ${vehicleId}`);
   }
-
+  
   console.log(`✅ Found prediction: ${prediction._id}\n`);
-
+  
   return orchestrateAgents(prediction._id);
 }
 

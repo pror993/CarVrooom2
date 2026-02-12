@@ -115,12 +115,12 @@ function DotGridCanvas() {
 
 /* ── Vehicle display-name map ──────────────────────────────────── */
 const VEHICLE_NAMES = {
-  VH_HEALTHY: 'Tata Prima 4928.S',
+  VH_HEALTHY:  'Tata Prima 4928.S',
   VH_DPF_FAIL: 'Tata Prima 4928.S II',
   VH_SCR_FAIL: 'Tata Signa 4825.TK',
   VH_OIL_FAIL: 'Tata Prima 4028.S',
-  VH_ANOMALY: 'Ashok Leyland Captain',
-  VH_CASCADE: 'Tata Prima 5530.S',
+  VH_ANOMALY:  'Ashok Leyland Captain',
+  VH_CASCADE:  'Tata Prima 5530.S',
 }
 function getVehicleName(v) {
   return VEHICLE_NAMES[v.vehicleId] ||
@@ -132,9 +132,9 @@ function getVehicleName(v) {
 function SeverityBadge({ level }) {
   const c = {
     critical: 'bg-red-500/10 text-red-400 border-red-500/20 shadow-red-500/5',
-    high: 'bg-orange-500/10 text-orange-400 border-orange-500/20 shadow-orange-500/5',
-    medium: 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20 shadow-yellow-500/5',
-    low: 'bg-green-500/10 text-green-400 border-green-500/20 shadow-green-500/5',
+    high:     'bg-orange-500/10 text-orange-400 border-orange-500/20 shadow-orange-500/5',
+    medium:   'bg-yellow-500/10 text-yellow-400 border-yellow-500/20 shadow-yellow-500/5',
+    low:      'bg-green-500/10 text-green-400 border-green-500/20 shadow-green-500/5',
   }[level] || 'bg-gray-500/10 text-gray-400 border-gray-500/20'
   return <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border shadow-sm capitalize ${c}`}>{level}</span>
 }
@@ -143,13 +143,13 @@ function SeverityBadge({ level }) {
 function FailureTypeBadge({ predictionType }) {
   if (!predictionType || predictionType === 'healthy') return null
   const map = {
-    dpf_failure: { Icon: HiFire, c: 'text-orange-400', l: 'DPF Failure' },
-    scr_failure: { Icon: HiBeaker, c: 'text-blue-400', l: 'SCR Failure' },
-    oil_failure: { Icon: HiDatabase, c: 'text-amber-400', l: 'Oil Failure' },
-    cascade_failure: { Icon: HiLightningBolt, c: 'text-red-400', l: 'Cascade' },
-    anomaly: { Icon: HiStatusOnline, c: 'text-purple-400', l: 'Anomaly' },
-    anomaly_detection: { Icon: HiStatusOnline, c: 'text-purple-400', l: 'Anomaly' },
-    single_failure: { Icon: HiExclamation, c: 'text-yellow-400', l: 'Failure' },
+    dpf_failure:       { Icon: HiFire,              c: 'text-orange-400', l: 'DPF Failure' },
+    scr_failure:       { Icon: HiBeaker,            c: 'text-blue-400',   l: 'SCR Failure' },
+    oil_failure:       { Icon: HiDatabase,          c: 'text-amber-400',  l: 'Oil Failure' },
+    cascade_failure:   { Icon: HiLightningBolt,     c: 'text-red-400',    l: 'Cascade' },
+    anomaly:           { Icon: HiStatusOnline,      c: 'text-purple-400', l: 'Anomaly' },
+    anomaly_detection: { Icon: HiStatusOnline,      c: 'text-purple-400', l: 'Anomaly' },
+    single_failure:    { Icon: HiExclamation,       c: 'text-yellow-400', l: 'Failure' },
   }
   const f = map[predictionType] || { Icon: HiCog, c: 'text-gray-400', l: predictionType?.replace('_', ' ') }
   const { Icon } = f
@@ -210,14 +210,14 @@ export default function FleetOwnerDashboard() {
   const navigate = useNavigate()
   const { connected, alerts: wsAlerts, tickInfo } = usePipelineSocket()
 
-  const [vehicles, setVehicles] = useState([])
+  const [vehicles, setVehicles]             = useState([])
   const [selectedVehicle, setSelectedVehicle] = useState(null)
   const [schedulerStatus, setSchedulerStatus] = useState(null)
-  const [cases, setCases] = useState([])
-  const [loading, setLoading] = useState(true)
-  const [actionLoading, setActionLoading] = useState(false)
-  const [activeNav, setActiveNav] = useState('dashboard')
-  const [showPanel, setShowPanel] = useState(false)
+  const [cases, setCases]                   = useState([])
+  const [loading, setLoading]               = useState(true)
+  const [actionLoading, setActionLoading]   = useState(false)
+  const [activeNav, setActiveNav]           = useState('dashboard')
+  const [showPanel, setShowPanel]           = useState(false)
 
   const fetchData = useCallback(async () => {
     try {
@@ -236,18 +236,18 @@ export default function FleetOwnerDashboard() {
 
   const START_DAY = 43
   const handleStart = async () => { setActionLoading(true); await pipelineAPI.start(START_DAY); await fetchData(); setActionLoading(false) }
-  const handleStop = async () => { setActionLoading(true); await pipelineAPI.stop(); await fetchData(); setActionLoading(false) }
+  const handleStop  = async () => { setActionLoading(true); await pipelineAPI.stop(); await fetchData(); setActionLoading(false) }
   const handleReset = async () => {
     if (!confirm('Reset scheduler and clear all prediction/case data?')) return
     setActionLoading(true); await pipelineAPI.reset(true); await fetchData(); setActionLoading(false)
   }
   const handleLogout = async () => { await logout(); navigate('/') }
 
-  const healthyCount = vehicles.filter(v => v.healthStatus === 'healthy').length
-  const warningCount = vehicles.filter(v => v.healthStatus === 'warning').length
+  const healthyCount  = vehicles.filter(v => v.healthStatus === 'healthy').length
+  const warningCount  = vehicles.filter(v => v.healthStatus === 'warning').length
   const criticalCount = vehicles.filter(v => v.healthStatus === 'critical').length
-  const pendingMaint = warningCount + criticalCount
-  const selectedData = selectedVehicle ? vehicles.find(v => v.vehicleId === selectedVehicle) : null
+  const pendingMaint  = warningCount + criticalCount
+  const selectedData  = selectedVehicle ? vehicles.find(v => v.vehicleId === selectedVehicle) : null
   const userName = user?.profile?.name || user?.email?.split('@')[0] || 'Fleet Owner'
 
   const allAlerts = useMemo(() => {
@@ -280,11 +280,11 @@ export default function FleetOwnerDashboard() {
         </div>
         <nav className="flex-1 px-3 py-3 space-y-0.5">
           {[
-            { id: 'dashboard', label: 'Dashboard', icon: HiHome },
-            { id: 'fleet', label: 'Fleet', icon: HiTruck },
-            { id: 'cases', label: 'Maintenance Cases', icon: HiClipboardList },
-            { id: 'notifications', label: 'Notifications', icon: HiBell, badge: allAlerts.length || null },
-            { id: 'account', label: 'Account', icon: HiUser },
+            { id:'dashboard',     label:'Dashboard',         icon:HiHome },
+            { id:'fleet',         label:'Fleet',             icon:HiTruck },
+            { id:'cases',         label:'Maintenance Cases', icon:HiClipboardList },
+            { id:'notifications', label:'Notifications',     icon:HiBell, badge:allAlerts.length||null },
+            { id:'account',       label:'Account',           icon:HiUser },
           ].map(n => {
             const Icon = n.icon, act = activeNav === n.id
             return (
@@ -353,21 +353,21 @@ export default function FleetOwnerDashboard() {
           {schedulerStatus?.isRunning && (
             <div className="mb-5"><div className="w-full bg-purple-950/20 rounded-full h-1">
               <div className="bg-gradient-to-r from-purple-600 to-purple-400 h-1 rounded-full transition-all duration-700 shadow-[0_0_8px_rgba(168,85,247,0.5)]"
-                style={{ width: `${((schedulerStatus.currentRowIndex || 0) / (schedulerStatus.maxRows || 17280)) * 100}%` }} />
+                style={{ width: `${((schedulerStatus.currentRowIndex||0)/(schedulerStatus.maxRows||17280))*100}%` }} />
             </div></div>
           )}
 
           {/* ── stat cards ── */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-5">
             {[
-              { label: 'Total Vehicles', value: vehicles.length, Icon: HiTruck, glow: 'purple' },
-              { label: 'Pending Maintenance', value: pendingMaint, Icon: HiCog, glow: 'yellow' },
-              { label: 'Total Alerts', value: allAlerts.length, Icon: HiExclamationCircle, glow: 'red' },
-            ].map((s, i) => (
+              { label:'Total Vehicles', value:vehicles.length, Icon:HiTruck,              glow:'purple' },
+              { label:'Pending Maintenance', value:pendingMaint, Icon:HiCog,              glow:'yellow' },
+              { label:'Total Alerts',   value:allAlerts.length, Icon:HiExclamationCircle, glow:'red'    },
+            ].map((s,i) => (
               <Card key={i} className="p-4">
                 <div className="flex items-center gap-3">
-                  <div className={`w-9 h-9 rounded-lg flex items-center justify-center ${s.glow === 'purple' ? 'bg-purple-500/10' : 'bg-purple-950/20'}`}>
-                    <s.Icon className={`text-lg ${s.glow === 'purple' ? 'text-purple-400' : s.glow === 'yellow' ? 'text-yellow-400' : 'text-red-400'}`} />
+                  <div className={`w-9 h-9 rounded-lg flex items-center justify-center ${s.glow==='purple'?'bg-purple-500/10':'bg-purple-950/20'}`}>
+                    <s.Icon className={`text-lg ${s.glow==='purple'?'text-purple-400':s.glow==='yellow'?'text-yellow-400':'text-red-400'}`} />
                   </div>
                   <div>
                     <p className="text-[10px] text-gray-500 font-medium uppercase tracking-wider">{s.label}</p>
@@ -400,9 +400,9 @@ export default function FleetOwnerDashboard() {
                   {/* Topo contour rings */}
                   <ellipse cx="200" cy="100" rx="130" ry="70" fill="none" stroke="rgba(168,85,247,0.06)" strokeWidth="0.7" />
                   <ellipse cx="200" cy="100" rx="100" ry="50" fill="none" stroke="rgba(168,85,247,0.05)" strokeWidth="0.5" />
-                  <ellipse cx="200" cy="100" rx="65" ry="32" fill="none" stroke="rgba(168,85,247,0.04)" strokeWidth="0.5" />
-                  <ellipse cx="420" cy="85" rx="60" ry="40" fill="none" stroke="rgba(139,92,246,0.06)" strokeWidth="0.7" />
-                  <ellipse cx="420" cy="85" rx="38" ry="22" fill="none" stroke="rgba(139,92,246,0.04)" strokeWidth="0.5" />
+                  <ellipse cx="200" cy="100" rx="65"  ry="32" fill="none" stroke="rgba(168,85,247,0.04)" strokeWidth="0.5" />
+                  <ellipse cx="420" cy="85"  rx="60"  ry="40" fill="none" stroke="rgba(139,92,246,0.06)" strokeWidth="0.7" />
+                  <ellipse cx="420" cy="85"  rx="38"  ry="22" fill="none" stroke="rgba(139,92,246,0.04)" strokeWidth="0.5" />
 
                   {/* Highway network */}
                   <path d="M60,90 Q150,75 250,80 Q350,85 500,70" fill="none" stroke="rgba(255,255,255,0.1)" strokeWidth="2" />
@@ -454,14 +454,14 @@ export default function FleetOwnerDashboard() {
                 </div>
 
                 {/* Vehicle GPS pins */}
-                {vehicles.map((v, i) => {
+                {vehicles.map((v,i) => {
                   const pos = [
-                    { left: '35%', top: '45%' }, { left: '55%', top: '32%' },
-                    { left: '42%', top: '60%' }, { left: '68%', top: '50%' },
-                    { left: '28%', top: '28%' }, { left: '50%', top: '70%' },
-                  ][i] || { left: '50%', top: '50%' }
-                  const clr = v.healthStatus === 'healthy' ? 'green' : v.healthStatus === 'critical' ? 'red' : 'yellow'
-                  const fill = clr === 'green' ? '#22c55e' : clr === 'red' ? '#ef4444' : '#eab308'
+                    {left:'35%',top:'45%'},{left:'55%',top:'32%'},
+                    {left:'42%',top:'60%'},{left:'68%',top:'50%'},
+                    {left:'28%',top:'28%'},{left:'50%',top:'70%'},
+                  ][i] || {left:'50%',top:'50%'}
+                  const clr = v.healthStatus==='healthy'?'green':v.healthStatus==='critical'?'red':'yellow'
+                  const fill = clr==='green'?'#22c55e':clr==='red'?'#ef4444':'#eab308'
                   return (
                     <div key={v.vehicleId} className="absolute group cursor-pointer -translate-x-1/2 -translate-y-full" style={pos}
                       onClick={() => navigate(`/vehicle/${v.vehicleId}`)}>
@@ -476,7 +476,7 @@ export default function FleetOwnerDashboard() {
                       </div>
                       <div className="hidden group-hover:block absolute bottom-full left-1/2 -translate-x-1/2 mb-1 px-2.5 py-1.5 bg-black/90 border border-purple-500/20 rounded-lg text-[9px] whitespace-nowrap z-10 shadow-[0_0_15px_-4px_rgba(168,85,247,0.35)]">
                         <p className="font-semibold text-white">{getVehicleName(v)}</p>
-                        <p className="text-gray-500 capitalize mt-0.5">{v.healthStatus} {v.latestPrediction ? `• ${Math.round((v.latestPrediction.etaDays / 90) * 100)}%` : ''}</p>
+                        <p className="text-gray-500 capitalize mt-0.5">{v.healthStatus} {v.latestPrediction ? `• ${Math.round((v.latestPrediction.etaDays/90)*100)}%` : ''}</p>
                       </div>
                     </div>
                   )
@@ -502,13 +502,13 @@ export default function FleetOwnerDashboard() {
                 <HealthDonut critical={criticalCount} medium={warningCount} low={healthyCount} />
                 <div className="w-full mt-5 space-y-2.5">
                   {[
-                    { label: 'Critical', color: 'bg-purple-500', shadow: 'shadow-purple-500/20', pct: criticalCount },
-                    { label: 'Warning', color: 'bg-yellow-500', shadow: 'shadow-yellow-500/20', pct: warningCount },
-                    { label: 'Healthy', color: 'bg-green-500', shadow: 'shadow-green-500/20', pct: healthyCount },
+                    { label:'Critical', color:'bg-purple-500', shadow:'shadow-purple-500/20', pct: criticalCount },
+                    { label:'Warning',  color:'bg-yellow-500', shadow:'shadow-yellow-500/20', pct: warningCount },
+                    { label:'Healthy',  color:'bg-green-500',  shadow:'shadow-green-500/20',  pct: healthyCount },
                   ].map(r => (
                     <div key={r.label} className="flex items-center justify-between">
                       <div className="flex items-center gap-2"><span className={`w-2 h-2 rounded-full ${r.color} ${r.shadow} shadow-sm`} /><span className="text-[11px] text-gray-500">{r.label}</span></div>
-                      <span className="text-[11px] font-semibold text-gray-300">{r.pct > 0 ? Math.round((r.pct / (vehicles.length || 1)) * 100) : 0}%</span>
+                      <span className="text-[11px] font-semibold text-gray-300">{r.pct > 0 ? Math.round((r.pct/(vehicles.length||1))*100) : 0}%</span>
                     </div>
                   ))}
                 </div>
@@ -534,10 +534,10 @@ export default function FleetOwnerDashboard() {
                 </div>
                 {vehicles.map(v => {
                   const pred = v.latestPrediction
-                  const hp = pred ? Math.min(100, Math.max(0, Math.round((pred.etaDays / 90) * 100))) : null
-                  const sLabel = v.healthStatus === 'critical' ? 'Overdue' : v.healthStatus === 'warning' ? 'Maintenance' : 'Active'
-                  const sColor = v.healthStatus === 'critical' ? 'text-red-400' : v.healthStatus === 'warning' ? 'text-yellow-400' : 'text-green-400'
-                  const dColor = v.healthStatus === 'critical' ? 'bg-red-400' : v.healthStatus === 'warning' ? 'bg-yellow-400' : 'bg-green-400'
+                  const hp = pred ? Math.min(100, Math.max(0, Math.round((pred.etaDays/90)*100))) : null
+                  const sLabel = v.healthStatus==='critical'?'Overdue':v.healthStatus==='warning'?'Maintenance':'Active'
+                  const sColor = v.healthStatus==='critical'?'text-red-400':v.healthStatus==='warning'?'text-yellow-400':'text-green-400'
+                  const dColor = v.healthStatus==='critical'?'bg-red-400':v.healthStatus==='warning'?'bg-yellow-400':'bg-green-400'
                   return (
                     <div key={v.vehicleId} onClick={() => navigate(`/vehicle/${v.vehicleId}`)}
                       className="grid grid-cols-12 gap-2 px-5 py-3 items-center cursor-pointer transition-all hover:bg-purple-900/10 border-b border-purple-500/5 last:border-0">
@@ -545,10 +545,10 @@ export default function FleetOwnerDashboard() {
                       <div className="col-span-2"><span className={`flex items-center gap-1.5 text-[11px] font-medium ${sColor}`}><span className={`w-1.5 h-1.5 rounded-full ${dColor}`} />{sLabel}</span></div>
                       <div className="col-span-2 text-[11px] text-gray-600">{schedulerStatus?.simDay ? `${Math.max(0, schedulerStatus.simDay - 43)}d` : '-'}</div>
                       <div className="col-span-2 text-right">
-                        <span className={`text-[13px] font-bold ${(hp ?? 100) >= 70 ? 'text-green-400' : (hp ?? 100) >= 40 ? 'text-yellow-400' : 'text-red-400'}`}>{hp !== null ? `${hp}%` : '-'}</span>
+                        <span className={`text-[13px] font-bold ${(hp??100)>=70?'text-green-400':(hp??100)>=40?'text-yellow-400':'text-red-400'}`}>{hp !== null ? `${hp}%` : '-'}</span>
                       </div>
                       <div className="col-span-3 text-right">
-                        {v.healthStatus === 'critical' ? <SeverityBadge level="critical" /> : v.healthStatus === 'warning' ? <SeverityBadge level="medium" /> : <span className="text-[10px] text-gray-700">-</span>}
+                        {v.healthStatus==='critical' ? <SeverityBadge level="critical" /> : v.healthStatus==='warning' ? <SeverityBadge level="medium" /> : <span className="text-[10px] text-gray-700">-</span>}
                       </div>
                     </div>
                   )
@@ -561,12 +561,12 @@ export default function FleetOwnerDashboard() {
                     <h3 className="text-sm font-semibold flex items-center gap-2">Maintenance Cases <span className="text-[9px] bg-purple-500/10 text-purple-400 px-1.5 py-0.5 rounded-full font-bold">{cases.length}</span></h3>
                   </div>
                   <div className="px-5 pb-4 space-y-2">
-                    {cases.slice(0, 5).map(c => (
+                    {cases.slice(0,5).map(c => (
                       <div key={c.caseId} className="flex items-center justify-between p-2.5 rounded-lg bg-purple-950/10 border border-purple-500/[0.07] hover:bg-purple-900/15 hover:border-purple-500/15 transition-all">
                         <div className="flex items-center gap-2.5 min-w-0">
-                          <div className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${c.severity === 'critical' ? 'bg-red-400' : c.severity === 'high' ? 'bg-orange-400' : 'bg-yellow-400'}`} />
+                          <div className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${c.severity==='critical'?'bg-red-400':c.severity==='high'?'bg-orange-400':'bg-yellow-400'}`} />
                           <div className="min-w-0">
-                            <p className="text-[12px] font-medium truncate">{getVehicleName(vehicles.find(v => v.vehicleId === c.vehicleId) || { vehicleId: c.vehicleId })}</p>
+                            <p className="text-[12px] font-medium truncate">{getVehicleName(vehicles.find(v=>v.vehicleId===c.vehicleId)||{vehicleId:c.vehicleId})}</p>
                             <p className="text-[10px] text-gray-600">{c.caseId} · {c.currentState}</p>
                           </div>
                         </div>
@@ -593,14 +593,14 @@ export default function FleetOwnerDashboard() {
                 <div className="px-5 pb-4 space-y-1.5 max-h-72 overflow-y-auto">
                   {allAlerts.length === 0 ? (
                     <div className="text-center py-8"><HiShieldCheck className="text-2xl mx-auto mb-2 text-purple-500/20" /><p className="text-[11px] text-gray-600">All systems nominal</p></div>
-                  ) : allAlerts.map((a, idx) => (
-                    <div key={a.caseId || `ws-${idx}`} className="flex items-center gap-2.5 p-2.5 rounded-lg bg-purple-950/10 border border-purple-500/[0.07] hover:bg-purple-900/15 hover:border-purple-500/15 transition-all">
+                  ) : allAlerts.map((a,idx) => (
+                    <div key={a.caseId||`ws-${idx}`} className="flex items-center gap-2.5 p-2.5 rounded-lg bg-purple-950/10 border border-purple-500/[0.07] hover:bg-purple-900/15 hover:border-purple-500/15 transition-all">
                       <HiExclamationCircle className="text-purple-400 flex-shrink-0 text-sm" />
                       <div className="min-w-0 flex-1">
-                        <p className="text-[11px] font-medium truncate">{getVehicleName(vehicles.find(v => v.vehicleId === a.vehicleId) || { vehicleId: a.vehicleId })}</p>
-                        <p className="text-[9px] text-gray-600">{a.etaDays ? `RUL: ${a.etaDays?.toFixed?.(1) || a.etaDays}d` : a.currentState || ''}</p>
+                        <p className="text-[11px] font-medium truncate">{getVehicleName(vehicles.find(v=>v.vehicleId===a.vehicleId)||{vehicleId:a.vehicleId})}</p>
+                        <p className="text-[9px] text-gray-600">{a.etaDays ? `RUL: ${a.etaDays?.toFixed?.(1)||a.etaDays}d` : a.currentState||''}</p>
                       </div>
-                      <SeverityBadge level={a.severity || 'medium'} />
+                      <SeverityBadge level={a.severity||'medium'} />
                     </div>
                   ))}
                 </div>
@@ -612,11 +612,11 @@ export default function FleetOwnerDashboard() {
                 </div>
                 <div className="px-5 pb-4 space-y-2">
                   {[
-                    { name: 'Tata Motors Authorized Workshop — Rohtak', type: 'Authorized Dealer' },
-                    { name: 'Highway Fleet Service Center — NH48 Gurugram', type: 'General Repairs' },
-                    { name: 'Ashok Leyland Service Hub — Manesar', type: 'EV & Heavy Vehicle Specialist' },
-                    { name: 'Quick Fix Fleet Garage — Industrial Area, Rohtak', type: 'Heavy Commercial Vehicles' },
-                  ].map((sc, i) => (
+                    { name:'Tata Motors Authorized Workshop — Rohtak', type:'Authorized Dealer' },
+                    { name:'Highway Fleet Service Center — NH48 Gurugram', type:'General Repairs' },
+                    { name:'Ashok Leyland Service Hub — Manesar', type:'EV & Heavy Vehicle Specialist' },
+                    { name:'Quick Fix Fleet Garage — Industrial Area, Rohtak', type:'Heavy Commercial Vehicles' },
+                  ].map((sc,i) => (
                     <div key={i} className="flex items-center justify-between p-2.5 rounded-lg bg-purple-950/10 border border-purple-500/[0.07] hover:bg-purple-900/15 hover:border-purple-500/15 transition-all">
                       <div className="flex items-center gap-2.5">
                         <div className="w-7 h-7 rounded-md bg-purple-500/10 flex items-center justify-center"><HiLocationMarker className="text-purple-400 text-xs" /></div>
@@ -637,26 +637,26 @@ export default function FleetOwnerDashboard() {
         <div className="fixed inset-0 z-40 flex justify-end">
           <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setShowPanel(false)} />
           <div className="relative w-full max-w-sm bg-purple-950/30 backdrop-blur-2xl border-l border-purple-500/15 h-screen overflow-y-auto shadow-[-20px_0_50px_-10px_rgba(168,85,247,0.15)]"
-            style={{ animation: 'slideIn .2s ease-out' }}>
+            style={{ animation:'slideIn .2s ease-out' }}>
             <div className="p-5">
               <div className="flex items-center justify-between mb-5">
                 <h3 className="text-base font-bold">{getVehicleName(selectedData)}</h3>
                 <button onClick={() => setShowPanel(false)} className="text-gray-600 hover:text-white p-1"><HiX className="text-sm" /></button>
               </div>
               <div className="flex items-center gap-2.5 mb-5">
-                <SeverityBadge level={selectedData.healthStatus === 'critical' ? 'critical' : selectedData.healthStatus === 'warning' ? 'medium' : 'low'} />
+                <SeverityBadge level={selectedData.healthStatus==='critical'?'critical':selectedData.healthStatus==='warning'?'medium':'low'} />
                 <FailureTypeBadge predictionType={selectedData.latestPrediction?.predictionType} />
               </div>
               <div className="grid grid-cols-2 gap-2.5 mb-5">
                 {[
-                  { l: 'Make / Model', v: `${selectedData.vehicleInfo?.make} ${selectedData.vehicleInfo?.model}` },
-                  { l: 'Year', v: selectedData.vehicleInfo?.year },
-                  { l: 'Avg Daily KM', v: selectedData.usageProfile?.avgDailyKm },
-                  { l: 'Load Pattern', v: selectedData.usageProfile?.loadPattern },
-                ].map((x, i) => (
+                  {l:'Make / Model', v:`${selectedData.vehicleInfo?.make} ${selectedData.vehicleInfo?.model}`},
+                  {l:'Year', v:selectedData.vehicleInfo?.year},
+                  {l:'Avg Daily KM', v:selectedData.usageProfile?.avgDailyKm},
+                  {l:'Load Pattern', v:selectedData.usageProfile?.loadPattern},
+                ].map((x,i) => (
                   <div key={i} className="p-2.5 rounded-lg bg-purple-950/10 border border-purple-500/[0.07]">
                     <p className="text-[9px] text-gray-600 uppercase tracking-wider mb-0.5">{x.l}</p>
-                    <p className="text-[12px] font-medium capitalize">{x.v || '-'}</p>
+                    <p className="text-[12px] font-medium capitalize">{x.v||'-'}</p>
                   </div>
                 ))}
               </div>
@@ -665,13 +665,13 @@ export default function FleetOwnerDashboard() {
                   <h4 className="text-[10px] text-gray-600 uppercase tracking-wider mb-2">Prediction</h4>
                   <div className="p-3 rounded-lg bg-purple-950/10 border border-purple-500/[0.07] space-y-2.5">
                     <div className="flex justify-between"><span className="text-[11px] text-gray-500">RUL</span>
-                      <span className={`text-[13px] font-bold ${selectedData.latestPrediction.etaDays >= 60 ? 'text-green-400' : selectedData.latestPrediction.etaDays >= 21 ? 'text-yellow-400' : 'text-red-400'}`}>{selectedData.latestPrediction.etaDays.toFixed(1)} days</span>
+                      <span className={`text-[13px] font-bold ${selectedData.latestPrediction.etaDays>=60?'text-green-400':selectedData.latestPrediction.etaDays>=21?'text-yellow-400':'text-red-400'}`}>{selectedData.latestPrediction.etaDays.toFixed(1)} days</span>
                     </div>
-                    <div className="flex justify-between"><span className="text-[11px] text-gray-500">Confidence</span><span className="text-[12px] font-medium">{(selectedData.latestPrediction.confidence * 100).toFixed(0)}%</span></div>
-                    <div className="flex justify-between"><span className="text-[11px] text-gray-500">Type</span><span className="text-[12px] font-medium capitalize">{selectedData.latestPrediction.predictionType?.replace('_', ' ')}</span></div>
+                    <div className="flex justify-between"><span className="text-[11px] text-gray-500">Confidence</span><span className="text-[12px] font-medium">{(selectedData.latestPrediction.confidence*100).toFixed(0)}%</span></div>
+                    <div className="flex justify-between"><span className="text-[11px] text-gray-500">Type</span><span className="text-[12px] font-medium capitalize">{selectedData.latestPrediction.predictionType?.replace('_',' ')}</span></div>
                     <div className="w-full bg-purple-950/20 rounded-full h-1">
-                      <div className={`h-1 rounded-full transition-all ${selectedData.latestPrediction.etaDays >= 60 ? 'bg-green-500 shadow-[0_0_6px_rgba(34,197,94,0.4)]' : selectedData.latestPrediction.etaDays >= 21 ? 'bg-yellow-500 shadow-[0_0_6px_rgba(234,179,8,0.4)]' : 'bg-red-500 shadow-[0_0_6px_rgba(239,68,68,0.4)]'}`}
-                        style={{ width: `${Math.min(100, (selectedData.latestPrediction.etaDays / 90) * 100)}%` }} />
+                      <div className={`h-1 rounded-full transition-all ${selectedData.latestPrediction.etaDays>=60?'bg-green-500 shadow-[0_0_6px_rgba(34,197,94,0.4)]':selectedData.latestPrediction.etaDays>=21?'bg-yellow-500 shadow-[0_0_6px_rgba(234,179,8,0.4)]':'bg-red-500 shadow-[0_0_6px_rgba(239,68,68,0.4)]'}`}
+                        style={{width:`${Math.min(100,(selectedData.latestPrediction.etaDays/90)*100)}%`}} />
                     </div>
                   </div>
                 </div>
@@ -680,21 +680,21 @@ export default function FleetOwnerDashboard() {
                 <div>
                   <h4 className="text-[10px] text-gray-600 uppercase tracking-wider mb-2">Model Outputs</h4>
                   <div className="space-y-1.5">
-                    {['dpf', 'scr', 'oil', 'anomaly'].map(m => {
+                    {['dpf','scr','oil','anomaly'].map(m => {
                       const o = selectedData.latestPrediction.modelOutputs[m]
-                      if (!o || o.status !== 'success') return null
+                      if (!o||o.status!=='success') return null
                       return (
                         <div key={m} className="flex items-center justify-between p-2.5 rounded-lg bg-purple-950/10 border border-purple-500/[0.07]">
                           <span className="text-[10px] font-semibold text-gray-400 uppercase">{m}</span>
-                          {m === 'anomaly' ? (
+                          {m==='anomaly' ? (
                             <div className="flex items-center gap-2">
                               <span className="text-[10px] text-gray-500">{o.anomaly_score?.toFixed(3)}</span>
-                              <span className={`text-[10px] font-semibold ${o.is_anomaly ? 'text-red-400' : 'text-green-400'}`}>{o.is_anomaly ? 'Anomaly' : 'Normal'}</span>
+                              <span className={`text-[10px] font-semibold ${o.is_anomaly?'text-red-400':'text-green-400'}`}>{o.is_anomaly?'Anomaly':'Normal'}</span>
                             </div>
                           ) : (
                             <div className="flex items-center gap-2">
-                              <span className={`text-[11px] font-mono font-semibold ${o.rul_days >= 60 ? 'text-green-400' : o.rul_days >= 21 ? 'text-yellow-400' : 'text-red-400'}`}>{o.rul_days?.toFixed(1)}d</span>
-                              <span className="text-[10px] text-gray-600">{(o.failure_probability * 100).toFixed(0)}%</span>
+                              <span className={`text-[11px] font-mono font-semibold ${o.rul_days>=60?'text-green-400':o.rul_days>=21?'text-yellow-400':'text-red-400'}`}>{o.rul_days?.toFixed(1)}d</span>
+                              <span className="text-[10px] text-gray-600">{(o.failure_probability*100).toFixed(0)}%</span>
                             </div>
                           )}
                         </div>

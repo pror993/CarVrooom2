@@ -94,7 +94,7 @@ exports.getVehiclePredictions = async (req, res) => {
     const { limit = 10, type } = req.query;
 
     const query = { vehicleId };
-
+    
     // Filter by prediction type if provided
     if (type && VALID_PREDICTION_TYPES.includes(type)) {
       query.predictionType = type;
@@ -127,7 +127,7 @@ exports.getAllPredictions = async (req, res) => {
     const skip = (parseInt(page) - 1) * parseInt(limit);
 
     const query = {};
-
+    
     // Filter by prediction type if provided
     if (type && ['cascade_failure', 'single_failure'].includes(type)) {
       query.predictionType = type;
@@ -166,13 +166,13 @@ exports.getPredictionStats = async (req, res) => {
     const query = vehicleId ? { vehicleId } : {};
 
     const total = await PredictionEvent.countDocuments(query);
-    const cascadeFailures = await PredictionEvent.countDocuments({
-      ...query,
-      predictionType: 'cascade_failure'
+    const cascadeFailures = await PredictionEvent.countDocuments({ 
+      ...query, 
+      predictionType: 'cascade_failure' 
     });
-    const singleFailures = await PredictionEvent.countDocuments({
-      ...query,
-      predictionType: 'single_failure'
+    const singleFailures = await PredictionEvent.countDocuments({ 
+      ...query, 
+      predictionType: 'single_failure' 
     });
 
     // Get average confidence
@@ -193,11 +193,11 @@ exports.getPredictionStats = async (req, res) => {
         cascade_failure: cascadeFailures,
         single_failure: singleFailures
       },
-      avgConfidence: avgConfidenceResult.length > 0
-        ? avgConfidenceResult[0].avgConfidence.toFixed(3)
+      avgConfidence: avgConfidenceResult.length > 0 
+        ? avgConfidenceResult[0].avgConfidence.toFixed(3) 
         : 0,
-      avgEtaDays: avgEtaResult.length > 0
-        ? Math.round(avgEtaResult[0].avgEtaDays)
+      avgEtaDays: avgEtaResult.length > 0 
+        ? Math.round(avgEtaResult[0].avgEtaDays) 
         : 0
     };
 

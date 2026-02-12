@@ -55,7 +55,7 @@ predictionEventSchema.index({ vehicleId: 1, createdAt: -1 });
 predictionEventSchema.index({ predictionType: 1 });
 
 // Virtual for checking if prediction is recent (within 7 days)
-predictionEventSchema.virtual('isRecent').get(function () {
+predictionEventSchema.virtual('isRecent').get(function() {
   const now = new Date();
   const diff = now - this.createdAt;
   const daysDiff = diff / (1000 * 60 * 60 * 24);
@@ -63,7 +63,7 @@ predictionEventSchema.virtual('isRecent').get(function () {
 });
 
 // Method to get formatted prediction summary
-predictionEventSchema.methods.getSummary = function () {
+predictionEventSchema.methods.getSummary = function() {
   return {
     vehicleId: this.vehicleId,
     type: this.predictionType,
