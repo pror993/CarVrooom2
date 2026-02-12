@@ -110,8 +110,8 @@ exports.login = async (req, res) => {
             name: profile.name,
             phone: profile.phone,
             ...(user.role === 'service_center' && profile.serviceCenterId
-              ? { serviceCenterId: profile.serviceCenterId }
-              : {}),
+                ? { serviceCenterId: profile.serviceCenterId }
+                : {}),
         } : null;
 
         res.json({

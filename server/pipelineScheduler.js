@@ -247,14 +247,14 @@ async function tick() {
     // ── Queue-based parallel processing ──────────────────────────
     // Instead of looping through vehicles sequentially, queue all vehicles for parallel processing
     const vehiclesToProcess = [];
-    
+
     for (const vehicleId of FLEET_VEHICLE_IDS) {
       const state = vehicleState[vehicleId];
       const rowsSinceLastPrediction = tickRowIndex - state.lastPredictionRow;
-      
+
       // Check if this vehicle needs prediction
-      if (tickRowIndex >= MIN_ROWS_FOR_PREDICTION && 
-          (rowsSinceLastPrediction >= PREDICTION_INTERVAL || !state.lastPrediction)) {
+      if (tickRowIndex >= MIN_ROWS_FOR_PREDICTION &&
+        (rowsSinceLastPrediction >= PREDICTION_INTERVAL || !state.lastPrediction)) {
         vehiclesToProcess.push(vehicleId);
         state.lastPredictionRow = tickRowIndex; // Mark as queued
       } else if (tickRowIndex < MIN_ROWS_FOR_PREDICTION) {
@@ -266,14 +266,14 @@ async function tick() {
 
     if (vehiclesToProcess.length > 0) {
       console.log(`   🚀 Queueing ${vehiclesToProcess.length} vehicles for parallel processing...`);
-      
+
       // Queue all vehicles at once - BullMQ will process them in parallel
       const jobs = await queueBatchPredictions(vehiclesToProcess, tickRowIndex, simDay);
-      
+
       // Get queue stats
       const queueStats = await getQueueStats();
       console.log(`   📊 Queue stats: ${queueStats.active} active, ${queueStats.waiting} waiting, ${queueStats.completed} completed`);
-      
+
       // CRITICAL: Wait for all jobs to complete before advancing to next tick
       console.log(`   ⏳ Waiting for ${jobs.length} jobs to complete...`);
       const results = await waitForJobs(jobs);
@@ -343,10 +343,10 @@ function start(options = {}) {
   console.log('║   🚀 VIRTUAL CLOCK SCHEDULER STARTED                       ║');
   console.log('╠══════════════════════════════════════════════════════════════╣');
   console.log(`║   Tick interval:  ${TICK_INTERVAL_MS}ms (real time)              ║`);
-  console.log(`║   Rows per tick:  ${TICK_ROWS} (= ${Math.round(TICK_ROWS/288)} sim day(s))                    ║`);
+  console.log(`║   Rows per tick:  ${TICK_ROWS} (= ${Math.round(TICK_ROWS / 288)} sim day(s))                    ║`);
   console.log(`║   Predict every:  ${PREDICTION_INTERVAL} rows                            ║`);
   console.log(`║   Total data:     ${MAX_ROWS} rows (60 days)                    ║`);
-  console.log(`║   Starting from:  Day ${Math.floor(currentRowIndex/288)} (row ${currentRowIndex})          ║`);
+  console.log(`║   Starting from:  Day ${Math.floor(currentRowIndex / 288)} (row ${currentRowIndex})          ║`);
   console.log(`║   Vehicles:       ${FLEET_VEHICLE_IDS.length}                                        ║`);
   console.log(`║   ML API:         ${ML_API_URL}                   ║`);
   console.log('╚══════════════════════════════════════════════════════════════╝\n');
